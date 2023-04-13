@@ -186,12 +186,14 @@ int ConnectorScanOperator::update_pickup_morsel_state() {
     int current_io_tasks = _num_running_io_tasks.load();
     PickupMorselState& state = _pickup_morsel_state;
     int& io_tasks = state.max_io_tasks;
+    const int MIN_IO_TASKS = config::connector_io_tasks_min_size;
 
-    if (!state.adjusted_io_tasks) return io_tasks;
+    if (!state.adjusted_io_tasks) {
+        io_tasks = std::max(io_tasks, MIN_IO_TASKS);
+        return io_tasks;
+    }
 
     auto f = [&]() {
-        const int MIN_IO_TASKS = config::connector_io_tasks_min_size;
-
         // update max io tasks.
         io_tasks = std::max(io_tasks, current_io_tasks);
         io_tasks = std::max(io_tasks, MIN_IO_TASKS);

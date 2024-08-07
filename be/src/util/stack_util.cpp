@@ -32,12 +32,12 @@
 #include "util/time.h"
 
 namespace google::glog_internal_namespace_ {
-void DumpStackTraceToString(std::string* stacktrace);
+void DumpStackTraceToString(std::string* stacktrace) {}
 } // namespace google::glog_internal_namespace_
 
 // import hidden stack trace functions from glog
 namespace google {
-int GetStackTrace(void** result, int max_depth, int skip_count);
+int GetStackTrace(void** result, int max_depth, int skip_count) { return 0;}
 bool Symbolize(void* pc, char* out, int out_size);
 } // namespace google
 

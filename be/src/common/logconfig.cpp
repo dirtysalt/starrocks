@@ -227,8 +227,8 @@ bool init_glog(const char* basename, bool install_signal_handler) {
     // These function should be called after InitGoogleLogging.
 
     if (config::dump_trace_info) {
-        google::InstallFailureWriter(failure_writer);
-        google::InstallFailureFunction(failure_function);
+        // google::InstallFailureWriter(failure_writer);
+        // google::InstallFailureFunction(failure_function);
     }
 
     logging_initialized = true;

@@ -45,6 +45,7 @@ struct ScannerCounter {
 
     int64_t file_read_ns = 0;
     int64_t file_read_count = 0;
+    int64_t file_read_bytes = 0;
 };
 
 class FileScanner {

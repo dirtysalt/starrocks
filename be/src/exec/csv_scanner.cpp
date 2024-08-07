@@ -86,6 +86,7 @@ Status CSVScanner::ScannerCSVReader::_fill_buffer() {
     } else {
         s.size = *res;
     }
+    _counter->file_read_bytes += s.size;
     _buff.add_limit(s.size);
     auto n = _buff.available();
     if (s.size == 0) {

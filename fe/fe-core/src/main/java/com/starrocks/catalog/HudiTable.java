@@ -26,11 +26,9 @@ import com.starrocks.analysis.DescriptorTable;
 import com.starrocks.analysis.Expr;
 import com.starrocks.analysis.LiteralExpr;
 import com.starrocks.common.util.TimeUtils;
-import com.starrocks.connector.GetRemoteFilesParams;
-import com.starrocks.connector.RemoteFileDesc;
-import com.starrocks.connector.RemoteFileInfo;
+import com.starrocks.connector.PartitionInfo;
+import com.starrocks.connector.PartitionUtil;
 import com.starrocks.connector.exception.StarRocksConnectorException;
-import com.starrocks.connector.hudi.HudiRemoteFileDesc;
 import com.starrocks.server.CatalogMgr;
 import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.thrift.TColumn;
@@ -41,7 +39,6 @@ import com.starrocks.thrift.TTableDescriptor;
 import com.starrocks.thrift.TTableType;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hudi.common.model.HoodieTableType;
-import org.apache.hudi.common.table.timeline.HoodieInstant;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -234,28 +231,28 @@ public class HudiTable extends Table implements HiveMetaStoreTable {
         }
 
         // partitions
-        List<PartitionKey> partitionKeys = Lists.newArrayList();
+        List<String> partitionNames = Lists.newArrayList();
         for (DescriptorTable.ReferencedPartitionInfo partition : partitions) {
-            partitionKeys.add(partition.getKey());
+            partitionNames.add(PartitionUtil.toHivePartitionName(getPartitionColumnNames(), partition.getKey()));
         }
-        List<RemoteFileInfo> hudiPartitions;
+        List<PartitionInfo> hudiPartitions;
         try {
-            GetRemoteFilesParams params = GetRemoteFilesParams.newBuilder().setPartitionKeys(partitionKeys).build();
             hudiPartitions = GlobalStateMgr.getCurrentState().getMetadataMgr()
-                    .getRemoteFiles(this, params);
+                    .getPartitions(this.getCatalogName(), this, partitionNames);
         } catch (StarRocksConnectorException e) {
             LOG.warn("Table {} gets partition info failed.", name, e);
             return null;
         }
 
-        HoodieInstant lastInstant = null;
+        LOG.warn(String.format("hudi partitions size = %d, partitions size = %d", hudiPartitions.size(), partitions.size()));
+
         for (int i = 0; i < hudiPartitions.size(); i++) {
             DescriptorTable.ReferencedPartitionInfo info = partitions.get(i);
             PartitionKey key = info.getKey();
             long partitionId = info.getId();
 
             THdfsPartition tPartition = new THdfsPartition();
-            tPartition.setFile_format(hudiPartitions.get(i).getFormat().toThrift());
+            tPartition.setFile_format(hudiPartitions.get(i).getFileFormat().toThrift());
 
             List<LiteralExpr> keys = key.getKeys();
             tPartition.setPartition_key_exprs(keys.stream().map(Expr::treeToThrift).collect(Collectors.toList()));
@@ -265,21 +262,6 @@ public class HudiTable extends Table implements HiveMetaStoreTable {
             tPartitionLocation.setSuffix(hudiPartitions.get(i).getFullPath());
             tPartition.setLocation(tPartitionLocation);
             tHudiTable.putToPartitions(partitionId, tPartition);
-
-            // update lastInstant according to remote file info.
-            {
-                RemoteFileInfo fileInfo = hudiPartitions.get(i);
-                for (RemoteFileDesc desc : fileInfo.getFiles()) {
-                    HudiRemoteFileDesc hudiDesc = (HudiRemoteFileDesc) desc;
-                    HoodieInstant instant = hudiDesc.getHudiInstant();
-                    if (instant == null) {
-                        continue;
-                    }
-                    if (lastInstant == null || instant.compareTo(lastInstant) > 0) {
-                        lastInstant = instant;
-                    }
-                }
-            }
         }
 
         Configuration conf = new Configuration();
@@ -293,7 +275,7 @@ public class HudiTable extends Table implements HiveMetaStoreTable {
         }
 
         if (tableType == HudiTableType.MOR) {
-            tHudiTable.setInstant_time(lastInstant == null ? "" : lastInstant.getTimestamp());
+            tHudiTable.setInstant_time("");
         }
 
         tHudiTable.setHive_column_names(hudiProperties.get(HUDI_TABLE_COLUMN_NAMES));

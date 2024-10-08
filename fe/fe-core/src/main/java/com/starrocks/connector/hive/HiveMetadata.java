@@ -292,6 +292,7 @@ public class HiveMetadata implements ConnectorMetadata {
         return fileOps.getRemotePartitions(partitionBuilder.build());
     }
 
+
     @Override
     public List<PartitionInfo> getPartitions(Table table, List<String> partitionNames) {
         HiveMetaStoreTable hmsTbl = (HiveMetaStoreTable) table;

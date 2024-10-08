@@ -26,6 +26,7 @@ import com.starrocks.common.DdlException;
 import com.starrocks.connector.ConnectorMetadata;
 import com.starrocks.connector.GetRemoteFilesParams;
 import com.starrocks.connector.HdfsEnvironment;
+import com.starrocks.connector.PartitionInfo;
 import com.starrocks.connector.RemoteFileInfo;
 import com.starrocks.connector.RemoteFileInfoSource;
 import com.starrocks.connector.RemoteFileOperations;
@@ -216,6 +217,20 @@ public class HudiMetadata implements ConnectorMetadata {
         }
 
         return statistics;
+    }
+
+    @Override
+    public List<PartitionInfo> getPartitions(Table table, List<String> partitionNames) {
+        HiveMetaStoreTable hmsTbl = (HiveMetaStoreTable) table;
+        if (hmsTbl.isUnPartitioned()) {
+            return Lists.newArrayList(hmsOps.getPartition(hmsTbl.getDbName(), hmsTbl.getTableName(),
+                    Lists.newArrayList()));
+        } else {
+            ImmutableList.Builder<PartitionInfo> partitions = ImmutableList.builder();
+            Map<String, Partition> partitionMap = hmsOps.getPartitionByNames(table, partitionNames);
+            partitionNames.forEach(partitionName -> partitions.add(partitionMap.get(partitionName)));
+            return partitions.build();
+        }
     }
 
     @Override

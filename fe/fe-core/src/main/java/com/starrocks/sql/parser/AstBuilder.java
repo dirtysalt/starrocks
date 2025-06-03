@@ -622,6 +622,10 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
         public AstBuilder create(long sqlMode, IdentityHashMap<ParserRuleContext, List<HintNode>> hintMap) {
             return new AstBuilder(sqlMode, hintMap);
         }
+        public com.starrocks.connector.parser.pinot.AstBuilder createPinotAst(long sqlMode, IdentityHashMap<ParserRuleContext,
+                List<HintNode>> hintMap) {
+            return new com.starrocks.connector.parser.pinot.AstBuilder(sqlMode, hintMap);
+        }
     }
 
     public List<Parameter> getParameters() {
@@ -7786,7 +7790,7 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
         return new VarBinaryLiteral(quotedText.substring(2, quotedText.length() - 1), createPos(context));
     }
 
-    private static String escapeBackSlash(String str) {
+    protected static String escapeBackSlash(String str) {
         StringWriter writer = new StringWriter();
         int strLen = str.length();
         for (int i = 0; i < strLen; ++i) {

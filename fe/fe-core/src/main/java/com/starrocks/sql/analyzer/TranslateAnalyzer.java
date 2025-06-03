@@ -32,8 +32,9 @@ public class TranslateAnalyzer {
         @Override
         public Void visitTranslateStatement(TranslateStmt statement, ConnectContext context) {
             String dialect = statement.getDialect();
-            if (!dialect.equalsIgnoreCase("trino")) {
-                throw new SemanticException(String.format("Unsupported dialect: %s, only support trino dialect now", dialect));
+            if (!dialect.equalsIgnoreCase("trino") && !dialect.equalsIgnoreCase("pinot")) {
+                throw new SemanticException(String.format("Unsupported dialect: %s, " +
+                        "only support trino/pinot dialect now", dialect));
             }
             return null;
         }

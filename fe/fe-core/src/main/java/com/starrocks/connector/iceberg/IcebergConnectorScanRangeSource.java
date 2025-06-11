@@ -244,6 +244,9 @@ public class IcebergConnectorScanRangeSource extends ConnectorScanRangeSource {
         }
 
         hdfsScanRange.setExtended_columns(extendedColumns);
+
+        // fill record count
+        hdfsScanRange.setRecord_count(file.recordCount());
         return hdfsScanRange;
     }
 

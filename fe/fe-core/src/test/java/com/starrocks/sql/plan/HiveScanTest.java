@@ -69,7 +69,7 @@ public class HiveScanTest extends ConnectorPlanTestBase {
                 "select min(id), date from iceberg0.partitioned_db.t1 group by date", "true",
                 "select max(id), date from iceberg0.partitioned_db.t1 group by date", "true",
                 "select max(id) as x, date from iceberg0.partitioned_db.t1 group by date having x > 10", "false",
-
+                "select max(id) as x, date from iceberg0.partitioned_db.t1 group by date having date > '2020-01-01'", "true",
         };
         Assert.assertTrue(sqlString.length % 2 == 0);
         for (int i = 0; i < sqlString.length; i += 2) {
@@ -93,6 +93,7 @@ public class HiveScanTest extends ConnectorPlanTestBase {
                     "select count(*) from lineitem_par",
                     "select count(*) from lineitem_par where l_shipdate = '1998-01-01'",
                     "select count(*), l_shipdate from lineitem_par where l_shipdate = '1998-01-01' group by l_shipdate",
+                    "select count(*), l_shipdate from lineitem_par group by l_shipdate having l_shipdate > '1998-01-01'",
             };
             for (int i = 0; i < sqlString.length; i++) {
                 String sql = sqlString[i];
@@ -107,7 +108,8 @@ public class HiveScanTest extends ConnectorPlanTestBase {
                     "select count(l_orderkey) from lineitem_par",
                     "select count(*) from lineitem_par where l_shipdate = '1998-01-01' and l_orderkey = 202",
                     "select count(*), count(l_orderkey), l_shipdate from lineitem_par where l_shipdate = '1998-01-01' group by " +
-                            "l_shipdate"
+                            "l_shipdate",
+                    "select count(*) as x, l_shipdate from lineitem_par group by l_shipdate having x > 10",
             };
             for (int i = 0; i < sqlString.length; i++) {
                 String sql = sqlString[i];
@@ -144,7 +146,8 @@ public class HiveScanTest extends ConnectorPlanTestBase {
                     "select count(*) from iceberg0.partitioned_db.t1",
                     "select count(*) from iceberg0.partitioned_db.t1 where date = '2020-01-01'",
                     "select count(*), date from iceberg0.partitioned_db.t1 where date = '2020-01-01' " +
-                            "group by date"
+                            "group by date",
+                    "select count(*), date from iceberg0.partitioned_db.t1 group by date having date > '2020-01-01'",
             };
             for (int i = 0; i < sqlString.length; i++) {
                 String sql = sqlString[i];
@@ -161,7 +164,8 @@ public class HiveScanTest extends ConnectorPlanTestBase {
                             " 202",
                     "select count(*), count(id), date from iceberg0.partitioned_db.t1 where date " +
                             "= '2020-01-01' group by " +
-                            "date"
+                            "date",
+                    "select count(*) as x, date from iceberg0.partitioned_db.t1 group by date having x > 10",
             };
             for (int i = 0; i < sqlString.length; i++) {
                 String sql = sqlString[i];

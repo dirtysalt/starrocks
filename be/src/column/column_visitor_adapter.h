@@ -93,6 +93,8 @@ public:
 
     Status visit(const LargeBinaryColumn& column) override { return _impl->do_visit(column); }
 
+    Status visit(const VariantColumn& column) override { return _impl->do_visit(column); }
+
 private:
     Impl* _impl;
 };
@@ -165,6 +167,8 @@ public:
     Status visit(BinaryColumn* column) override { return _impl->do_visit(column); }
 
     Status visit(LargeBinaryColumn* column) override { return _impl->do_visit(column); }
+
+    Status visit(VariantColumn* column) override { return _impl->do_visit(column); }
 
 private:
     Impl* _impl;

@@ -56,6 +56,7 @@ public:
     virtual Status visit(const BitmapColumn& column);
     virtual Status visit(const PercentileColumn& column);
     virtual Status visit(const JsonColumn& column);
+    virtual Status visit(const VariantColumn& column);
     virtual Status visit(const FixedLengthColumn<int96_t>& column);
     virtual Status visit(const FixedLengthColumn<uint24_t>& column);
     virtual Status visit(const FixedLengthColumn<decimal12_t>& column);
@@ -80,6 +81,7 @@ public:
     virtual Status visit(const FixedLengthColumnBase<uint24_t>& column);
     virtual Status visit(const FixedLengthColumnBase<decimal12_t>& column);
     virtual Status visit(const ObjectColumn<JsonValue>& column);
+    virtual Status visit(const ObjectColumn<VariantValue>& column);
     virtual Status visit(const ArrayViewColumn& column) {
         return Status::NotSupported("ArrayViewColumn is not supported");
     }

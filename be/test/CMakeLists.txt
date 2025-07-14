@@ -15,6 +15,7 @@ set(EXEC_FILES
         ./column/field_test.cpp
         ./column/fixed_length_column_test.cpp
         ./column/json_column_test.cpp
+        ./column/variant_column_test.cpp
         ./column/map_column_test.cpp
         ./column/struct_column_test.cpp
         ./column/nullable_column_test.cpp
@@ -443,6 +444,7 @@ set(EXEC_FILES
         ./serde/protobuf_serde_test.cpp
         ./types/bitmap_value_test.cpp
         ./types/type_checker_test.cpp
+        ./types/variant_value_test.cpp
         ./simd/batch_run_counter_test.cpp
         ./simd/simd_test.cpp
         ./simd/simd_selector_test.cpp
@@ -523,6 +525,7 @@ set(EXEC_FILES
         ./util/numeric_types_test.cpp
         ./util/stack_util_test.cpp
         ./util/url_coding_test.cpp
+        ./util/variant_value_test.cpp
         ./gutil/cpu_test.cc
         ./gutil/sysinfo-test.cc
         ./service/lake_service_test.cpp

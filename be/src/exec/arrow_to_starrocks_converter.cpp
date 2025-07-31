@@ -15,6 +15,7 @@
 #include "exec/arrow_to_starrocks_converter.h"
 
 #include <arrow/array.h>
+#include <glog/logging.h>
 
 #include "arrow/array/array_binary.h"
 #include "arrow/array/array_nested.h"
@@ -30,6 +31,7 @@
 #include "common/status.h"
 #include "exec/arrow_type_traits.h"
 #include "exec/parquet_scanner.h"
+#include "formats/parquet/variant.h"
 #include "gutil/strings/fastmem.h"
 #include "gutil/strings/substitute.h"
 #include "runtime/datetime_value.h"
@@ -163,9 +165,9 @@ void offsets_copy(const T* __restrict arrow_offsets_data, T arrow_base_offset, s
 }
 
 template <LogicalType LT, typename = StringOrBinaryGaurd<LT>>
-static inline constexpr uint32_t binary_max_length = (LT == TYPE_VARCHAR || LT == TYPE_VARBINARY)
-                                                             ? TypeDescriptor::MAX_VARCHAR_LENGTH
-                                                             : TypeDescriptor::MAX_CHAR_LENGTH;
+static inline constexpr uint32_t binary_max_length =
+        (LT == TYPE_VARCHAR || LT == TYPE_VARBINARY) ? TypeDescriptor::MAX_VARCHAR_LENGTH
+                                                     : TypeDescriptor::MAX_CHAR_LENGTH;
 
 template <ArrowTypeId AT, LogicalType LT, bool is_nullable, bool is_strict>
 struct ArrowConverter<AT, LT, is_nullable, is_strict, BinaryATGuard<AT>, StringOrBinaryGaurd<LT>> {
@@ -727,6 +729,87 @@ struct ArrowConverter<AT, LT, is_nullable, is_strict, JsonGuard<LT>> {
     }
 };
 
+template <ArrowTypeId AT, LogicalType LT, bool is_nullable, bool is_strict>
+struct ArrowConverter<AT, LT, is_nullable, is_strict, VariantGuard<LT>> {
+    static Status load_variant_from_arrow(const arrow::StructArray* variant_array, VariantColumn* variant_column,
+                                          size_t array_start_idx, size_t num_elements) {
+        auto struct_type = variant_array->struct_type();
+        std::shared_ptr<arrow::Array> metadata_array;
+        std::shared_ptr<arrow::Array> value_array;
+        for (int i = 0; i < struct_type->num_fields(); i++) {
+            const auto& field_name = struct_type->field(i)->name();
+            if (field_name == "metadata") {
+                metadata_array = variant_array->field(i);
+            } else if (field_name == "value") {
+                value_array = variant_array->field(i);
+            }
+        }
+
+        for (int offset = array_start_idx; offset < array_start_idx + num_elements; ++offset) {
+            auto* metadata_binary_array = down_cast<const arrow::BinaryArray*>(metadata_array.get());
+            using ArrowOffsetType = arrow::BinaryArray::offset_type;
+            ArrowOffsetType metadata_length = 0;
+            const auto metadata_data =
+                    reinterpret_cast<const char*>(metadata_binary_array->GetValue(offset, &metadata_length));
+
+            auto* value_binary_array = down_cast<const arrow::BinaryArray*>(value_array.get());
+            ArrowOffsetType value_length = 0;
+            const auto value_data = reinterpret_cast<const char*>(value_binary_array->GetValue(offset, &value_length));
+
+            VariantValue variant_value;
+            if (metadata_length == 0 && value_length == 0) {
+                variant_value = VariantValue::of_null();
+            } else {
+                variant_value = VariantValue(std::string_view(metadata_data, metadata_length),
+                                             std::string_view(value_data, value_length));
+            }
+
+            variant_column->append(std::move(variant_value));
+        }
+
+        return Status::OK();
+    }
+
+    static Status convert_arrow_to_variant(const arrow::StructArray* struct_array, VariantColumn* variant_column,
+                                           size_t array_start_idx, size_t num_elements) {
+        auto struct_type = struct_array->struct_type();
+        if (struct_type->num_fields() != 2) {
+            return Status::NotSupported(
+                    "Variant struct array must have exactly two fields: metadata and value. Shredding variant has 3 "
+                    "fields but not support yet");
+        }
+        const auto metadata_field = struct_type->GetFieldByName("metadata");
+        const auto value_field = struct_type->GetFieldByName("value");
+        if (metadata_field == nullptr || value_field == nullptr) {
+            return Status::InternalError("Variant struct array require metadata and value fields");
+        }
+        if (metadata_field->nullable() || value_field->nullable()) {
+            return Status::InternalError("Variant metadata and value fields must be required");
+        }
+        if (metadata_field->type()->id() != ArrowTypeId::BINARY || value_field->type()->id() != ArrowTypeId::BINARY) {
+            return Status::InternalError("Variant metadata and value fields must be binary type");
+        }
+
+        return load_variant_from_arrow(struct_array, variant_column, array_start_idx, num_elements);
+    }
+
+    static Status apply(const arrow::Array* array, size_t array_start_idx, size_t num_elements, Column* column,
+                        size_t column_start_idx, [[maybe_unused]] uint8_t* null_data,
+                        [[maybe_unused]] Filter* chunk_filter, ArrowConvertContext* ctx,
+                        [[maybe_unused]] ConvertFuncTree* conv_func) {
+        if (const auto type_id = array->type_id(); type_id != ArrowTypeId::STRUCT) {
+            return Status::NotSupported(
+                    strings::Substitute("Variant column only support struct arrow type, but got $0", type_id));
+        }
+
+        auto* struct_array = down_cast<const arrow::StructArray*>(array);
+        auto* variant_column = down_cast<VariantColumn*>(column);
+        variant_column->reserve(column->size() + num_elements);
+
+        return convert_arrow_to_variant(struct_array, variant_column, array_start_idx, num_elements);
+    }
+};
+
 template <typename T>
 static void list_map_offsets_copy(const arrow::Array* layer, const size_t array_start_idx, const size_t num_elements,
                                   UInt32Column* col_offsets) {
@@ -925,8 +1008,7 @@ constexpr int32_t convert_idx(ArrowTypeId at, LogicalType lt, bool is_nullable, 
     return (at << 17) | (lt << 2) | (is_nullable ? 2 : 0) | (is_strict ? 1 : 0);
 }
 
-#define ARROW_CONV_SINGLE_ENTRY_CTOR(a, b, t0, t1) \
-    { convert_idx(a, b, t0, t1), &ArrowConverter<a, b, t0, t1>::apply }
+#define ARROW_CONV_SINGLE_ENTRY_CTOR(a, b, t0, t1) {convert_idx(a, b, t0, t1), &ArrowConverter<a, b, t0, t1>::apply}
 
 #define ARROW_CONV_ENTRY_CTOR(a, b)                                                                    \
     ARROW_CONV_SINGLE_ENTRY_CTOR(a, b, false, false), ARROW_CONV_SINGLE_ENTRY_CTOR(a, b, false, true), \
@@ -934,8 +1016,7 @@ constexpr int32_t convert_idx(ArrowTypeId at, LogicalType lt, bool is_nullable, 
 
 #define ARROW_CONV_ENTRY(a, ...) DEF_BINARY_RELATION_ENTRY_SEP_COMMA(ARROW_CONV_ENTRY_CTOR, a, ##__VA_ARGS__)
 
-#define STRICT_ARROW_CONV_ENTRY_CTOR(a, b) \
-    { a, b }
+#define STRICT_ARROW_CONV_ENTRY_CTOR(a, b) {a, b}
 #define STRICT_ARROW_CONV_ENTRY_R(a, ...) \
     DEF_BINARY_RELATION_ENTRY_SEP_COMMA_R(STRICT_ARROW_CONV_ENTRY_CTOR, a, ##__VA_ARGS__)
 
@@ -995,7 +1076,7 @@ static const std::unordered_map<int32_t, ConvertFunc> global_optimized_arrow_con
         ARROW_CONV_ENTRY(ArrowTypeId::LIST, TYPE_ARRAY, TYPE_JSON),
         ARROW_CONV_ENTRY(ArrowTypeId::LARGE_LIST, TYPE_ARRAY, TYPE_JSON),
         ARROW_CONV_ENTRY(ArrowTypeId::FIXED_SIZE_LIST, TYPE_ARRAY, TYPE_JSON),
-        ARROW_CONV_ENTRY(ArrowTypeId::STRUCT, TYPE_STRUCT, TYPE_JSON),
+        ARROW_CONV_ENTRY(ArrowTypeId::STRUCT, TYPE_STRUCT, TYPE_JSON, TYPE_VARIANT),
 };
 
 ConvertFunc get_arrow_converter(ArrowTypeId at, LogicalType lt, bool is_nullable, bool is_strict) {

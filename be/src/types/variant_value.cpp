@@ -25,22 +25,36 @@
 
 namespace starrocks {
 
-StatusOr<std::string_view> VariantValue::load_metadata(std::string_view variant) const {
-    if (variant.size() < 3) {
-        return Status::NotSupported("Variant metadata is too short");
+Status VariantValue::validate_metadata(const std::string_view metadata) {
+    // metadata at least 3 bytes: version, dictionarySize and at least one offset.
+    if (metadata.size() < 3) {
+        return Status::InternalError("Variant metadata is too short");
     }
 
-    const uint8_t header = static_cast<uint8_t>(variant[0]);
+    const uint8_t header = static_cast<uint8_t>(metadata[0]);
     if (const uint8_t version = header & kVersionMask; version != 1) {
         return Status::NotSupported("Unsupported variant version: " + std::to_string(version));
     }
 
+    return Status::OK();
+}
+
+VariantValue VariantValue::of_null() {
+    static constexpr uint8_t header = static_cast<uint8_t>(VariantPrimitiveType::NULL_TYPE) << 2;
+    static constexpr uint8_t null_chars[] = {header};
+    return VariantValue(VariantMetadata::kEmptyMetadata,
+                        std::string_view{reinterpret_cast<const char*>(null_chars), 1});
+}
+
+StatusOr<std::string_view> VariantValue::load_metadata(std::string_view variant) const {
+    RETURN_IF_ERROR(validate_metadata(variant));
+
+    const uint8_t header = static_cast<uint8_t>(variant[0]);
     const uint8_t offset_size = 1 + ((header & kOffsetSizeMask) >> kOffsetSizeShift);
     if (offset_size < 1 || offset_size > 4) {
         return Status::InvalidArgument("Invalid offset size in variant metadata: " + std::to_string(offset_size) +
                                        ", expected 1, 2, 3 or 4 bytes");
     }
-
     uint8_t dict_size = VariantUtil::readLittleEndianUnsigned(variant.data() + 1, offset_size);
     uint8_t offset_list_offset = kHeaderSize + offset_size;
     uint8_t data_offset = offset_list_offset + (1 + dict_size) * offset_size;

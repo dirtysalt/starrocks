@@ -27,7 +27,15 @@ namespace starrocks {
 
 class VariantValue {
 public:
-    VariantValue(const std::string_view metadata, const std::string_view value) : _metadata(metadata), _value(value) {}
+    VariantValue(const std::string_view metadata, const std::string_view value) : _metadata(metadata), _value(value) {
+        if (auto status = validate_metadata(_metadata); !status.ok()) {
+            throw std::runtime_error("Invalid metadata: " + status.to_string());
+        }
+
+        if (value.empty()) {
+            throw std::runtime_error("Value cannot be empty");
+        }
+    }
 
     explicit VariantValue(const Slice& slice) {
         const char* variant_raw = slice.get_data();
@@ -55,6 +63,8 @@ public:
 
     VariantValue(VariantValue&& rhs) noexcept : _metadata(std::move(rhs._metadata)), _value(std::move(rhs._value)) {}
 
+    static Status validate_metadata(const std::string_view metadata);
+
     VariantValue& operator=(const VariantValue& rhs) {
         if (this != &rhs) {
             _metadata = rhs._metadata;
@@ -72,6 +82,8 @@ public:
 
         return *this;
     }
+
+    static VariantValue of_null();
 
     // Load metadata from the variant binary.
     // will slice the variant binary to extract metadata

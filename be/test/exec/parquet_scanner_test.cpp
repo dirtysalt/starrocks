@@ -224,7 +224,8 @@ class ParquetScannerTest : public ::testing::Test {
                 {"nested_array_c0", TypeDescriptor::create_array_type(TypeDescriptor::create_array_type(
                                             TypeDescriptor::from_logical_type(TYPE_VARCHAR)))},
                 {"col_map", TypeDescriptor::create_map_type(TypeDescriptor::create_varchar_type(1048576),
-                                                            TypeDescriptor::create_varchar_type(1048576))}};
+                                                            TypeDescriptor::create_varchar_type(1048576))},
+                {"col_variant", TypeDescriptor::create_variant_type()}};
         SlotTypeDescInfoArray slot_infos;
         slot_infos.reserve(column_names.size());
         for (auto& name : column_names) {
@@ -772,6 +773,23 @@ TEST_F(ParquetScannerTest, datetime) {
             EXPECT_EQ(expect, result);
         }
     }
+}
+
+TEST_F(ParquetScannerTest, test_variant) {
+    const std::vector variant_file_name = {test_exec_dir + "/test_data/parquet_data/variant.parquet"};
+    std::vector<std::string> column = {"col_variant"};
+    auto slot_infos = select_columns(column, true);
+    auto ranges = generate_ranges(variant_file_name, slot_infos.size(), {});
+    auto* desc_tbl = DescTblHelper::generate_desc_tbl(_runtime_state, _obj_pool, {slot_infos, {}});
+    auto scanner = create_parquet_scanner("UTC", desc_tbl, {}, ranges);
+    auto check = [](const ChunkPtr& chunk) {
+        auto& columns = chunk->columns();
+        for (auto& col : columns) {
+            ASSERT_TRUE(col->is_nullable() && !col->is_constant());
+        }
+    };
+
+    validate(scanner, 24, check);
 }
 
 TEST_F(ParquetScannerTest, optional_map_key) {

@@ -105,7 +105,7 @@ public abstract class Type implements Cloneable {
             PrimitiveType.INVALID_TYPE, PrimitiveType.NULL_TYPE, PrimitiveType.DECIMALV2,
             PrimitiveType.DECIMAL32, PrimitiveType.DECIMAL64, PrimitiveType.DECIMAL128,
             PrimitiveType.TIME, PrimitiveType.JSON, PrimitiveType.FUNCTION,
-            PrimitiveType.BINARY, PrimitiveType.VARBINARY);
+            PrimitiveType.BINARY, PrimitiveType.VARBINARY, PrimitiveType.VARIANT);
 
     // Static constant types for scalar types that don't require additional information.
     public static final ScalarType INVALID = new ScalarType(PrimitiveType.INVALID_TYPE);
@@ -153,6 +153,7 @@ public abstract class Type implements Cloneable {
     public static final ScalarType BITMAP = new ScalarType(PrimitiveType.BITMAP);
     public static final ScalarType PERCENTILE = new ScalarType(PrimitiveType.PERCENTILE);
     public static final ScalarType JSON = new ScalarType(PrimitiveType.JSON);
+    public static final ScalarType VARIANT = new ScalarType(PrimitiveType.VARIANT);
     public static final ScalarType UNKNOWN_TYPE = ScalarType.createUnknownType();
     public static final ScalarType FUNCTION = new ScalarType(PrimitiveType.FUNCTION);
     public static final ScalarType VARBINARY = new ScalarType(PrimitiveType.VARBINARY);
@@ -225,6 +226,7 @@ public abstract class Type implements Cloneable {
                     .add(ANY_MAP)
                     .add(ANY_STRUCT)
                     .add(JSON)
+                    .add(VARIANT)
                     .add(FUNCTION)
                     .add(VARBINARY)
                     .add(UNKNOWN_TYPE)
@@ -902,6 +904,10 @@ public abstract class Type implements Cloneable {
 
     public boolean isJsonType() {
         return isScalarType(PrimitiveType.JSON);
+    }
+
+    public boolean isVariantType() {
+        return isScalarType(PrimitiveType.VARIANT);
     }
 
     public boolean isPercentile() {

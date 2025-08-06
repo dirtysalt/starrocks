@@ -173,6 +173,8 @@ set(EXEC_FILES
         ./exprs/utility_functions_test.cpp
         ./exprs/runtime_filter_test.cpp
         ./exprs/subfield_expr_test.cpp
+        ./exprs/variant_path_parser_test.cpp
+        ./exprs/variant_functions_test.cpp
         ./exprs/vectorized_literal_test.cpp
         ./exprs/min_max_predicate_test.cpp
         ./exprs/in_const_predicate_test.cpp
@@ -525,7 +527,6 @@ set(EXEC_FILES
         ./util/numeric_types_test.cpp
         ./util/stack_util_test.cpp
         ./util/url_coding_test.cpp
-        ./util/variant_value_test.cpp
         ./gutil/cpu_test.cc
         ./gutil/sysinfo-test.cc
         ./service/lake_service_test.cpp

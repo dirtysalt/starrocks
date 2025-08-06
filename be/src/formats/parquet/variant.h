@@ -14,11 +14,9 @@
 
 #pragma once
 
-#include <memory>
-#include <vector>
-
 #include "common/status.h"
 #include "runtime/decimalv2_value.h"
+#include "types/variant_value.h"
 #include "util/decimal_types.h"
 
 namespace starrocks {
@@ -97,6 +95,10 @@ public:
     uint32_t get_index(std::string_view key) const;
     // return the field name for the index
     StatusOr<std::string_view> get_key(uint32_t index) const;
+
+    std::string_view get_raw_metadata() const {
+        return _metadata;
+    }
 
     static constexpr char kEmptyMetadataChars[] = {0x1, 0x0, 0x0};
     static constexpr std::string_view kEmptyMetadata{kEmptyMetadataChars, sizeof(kEmptyMetadataChars)};
@@ -179,6 +181,11 @@ public:
     // Get the variant value of the object field
     // returns the value of the field with the given field id
     StatusOr<Variant> get_element_at_index(uint32_t index) const;
+
+    StatusOr<VariantValue> to_value() const {
+        VariantValue value(_metadata.get_raw_metadata(), _value);
+        return value;
+    }
 
 private:
     uint8_t value_header() const;

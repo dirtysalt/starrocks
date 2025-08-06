@@ -19,11 +19,31 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <cstring>
 
-#include "formats/parquet/variant.h"
 #include "util/url_coding.h"
 #include "util/variant_util.h"
 
 namespace starrocks {
+
+VariantValue::VariantValue(const Slice& slice) {
+    const char* variant_raw = slice.get_data();
+    // convert variant_raw to a string_view
+    // The first 4 bytes are the size of the value
+    uint32_t variant_size;
+    std::memcpy(&variant_size, variant_raw, sizeof(uint32_t));
+    if (variant_size > slice.get_size() - sizeof(uint32_t)) {
+        throw std::runtime_error("Invalid variant size");
+    }
+
+    const auto variant = std::string_view(variant_raw + sizeof(uint32_t), variant_size);
+    auto metadata_status = load_metadata(variant);
+    if (!metadata_status.ok()) {
+        throw std::runtime_error("Failed to load metadata: " + metadata_status.status().to_string());
+    }
+
+    _metadata = std::string(metadata_status.value());
+    _value = std::string(variant_raw + sizeof(uint32_t) + metadata_status.value().size(),
+                         variant_size - metadata_status.value().size());
+}
 
 Status VariantValue::validate_metadata(const std::string_view metadata) {
     // metadata at least 3 bytes: version, dictionarySize and at least one offset.

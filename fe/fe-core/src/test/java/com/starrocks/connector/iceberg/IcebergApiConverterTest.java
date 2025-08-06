@@ -93,6 +93,13 @@ public class IcebergApiConverterTest {
     }
 
     @Test
+    public void testVariant() {
+        Type variantType = fromIcebergType(Types.VariantType.get());
+        Assert.assertTrue(variantType.isVariantType());
+        Assert.assertEquals(ScalarType.createType(PrimitiveType.VARIANT), variantType);
+    }
+
+    @Test
     public void testUnsupported() {
         org.apache.iceberg.types.Type icebergType = Types.MapType.ofRequired(1, 2,
                 Types.ListType.ofRequired(136, Types.IntegerType.get()), Types.StringType.get());
@@ -197,6 +204,7 @@ public class IcebergApiConverterTest {
         columns.add(new Column("c14", new MapType(Type.INT, Type.INT)));
         columns.add(new Column("c15", new StructType(ImmutableList.of(Type.INT))));
         columns.add(new Column("c16", Type.TIME));
+        columns.add(new Column("c17", Type.VARIANT));
 
         Schema schema = IcebergApiConverter.toIcebergApiSchema(columns);
         Assertions.assertEquals("table {\n" +
@@ -216,6 +224,7 @@ public class IcebergApiConverterTest {
                 "  14: c14: required map<int, int>\n" +
                 "  15: c15: required struct<20: col1: optional int>\n" +
                 "  16: c16: required time\n" +
+                "  17: c17: required variant\n" +
                 "}", schema.toString());
 
         PartitionSpec spec = IcebergApiConverter.parsePartitionFields(schema, Lists.newArrayList("c1"));

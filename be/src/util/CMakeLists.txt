@@ -111,6 +111,7 @@ set(UTIL_FILES
   debug_action.cpp
   internal_service_recoverable_stub.cpp
   byte_buffer.cpp
+  variant_converter.cpp
   variant_util.cpp
 )
 

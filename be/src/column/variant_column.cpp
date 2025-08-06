@@ -73,7 +73,7 @@ void VariantColumn::append(const VariantValue* object) {
 }
 
 void VariantColumn::append(VariantValue&& object) {
-    BaseClass::append(std::move(object));
+    BaseClass::append(object);
 }
 
 } // namespace starrocks

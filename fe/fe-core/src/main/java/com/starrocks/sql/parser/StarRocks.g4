@@ -2986,6 +2986,7 @@ baseType
     | HLL
     | PERCENTILE
     | JSON
+    | VARIANT
     | VARBINARY typeParameter?
     | BINARY typeParameter?
     ;

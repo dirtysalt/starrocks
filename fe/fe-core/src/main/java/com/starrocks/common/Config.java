@@ -2973,7 +2973,7 @@ public class Config extends ConfigBase {
                     "Only takes effect for tables in clusters with run_mode=shared_data.\n")
     public static long lake_autovacuum_stale_partition_threshold = 12;
 
-    @ConfField(mutable = true, comment = 
+    @ConfField(mutable = true, comment =
             "Determine whether a vacuum operation needs to be initiated based on the vacuum version.\n")
     public static boolean lake_autovacuum_detect_vaccumed_version = true;
 
@@ -3718,6 +3718,9 @@ public class Config extends ConfigBase {
      */
     @ConfField(mutable = true)
     public static long max_graceful_exit_time_second = 60;
+
+    @ConfField(mutable = true)
+    public static long default_statistics_output_row_count = 1L * 1000 * 1000 * 1000;
 
     /**
      * Whether to enable tracing historical nodes when cluster scale

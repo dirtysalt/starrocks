@@ -561,6 +561,23 @@ public abstract class Type implements Cloneable {
             compatibilityMatrix[scalar.ordinal()][VARBINARY.ordinal()] = PrimitiveType.INVALID_TYPE;
         }
 
+        // VARIANT
+        for (PrimitiveType type : PrimitiveType.VARIANT_COMPATIBLE_TYPE) {
+            ScalarType scalar = ScalarType.createType(type);
+            compatibilityMatrix[scalar.ordinal()][VARIANT.ordinal()] = type;
+        }
+        for (PrimitiveType type : PrimitiveType.VARIANT_UNCOMPATIBLE_TYPE) {
+            ScalarType scalar = ScalarType.createType(type);
+            compatibilityMatrix[scalar.ordinal()][VARIANT.ordinal()] = PrimitiveType.INVALID_TYPE;
+        }
+        compatibilityMatrix[VARIANT.ordinal()][DATE.ordinal()] = PrimitiveType.INVALID_TYPE;
+        compatibilityMatrix[VARIANT.ordinal()][DATETIME.ordinal()] = PrimitiveType.INVALID_TYPE;
+        compatibilityMatrix[VARIANT.ordinal()][TIME.ordinal()] = PrimitiveType.INVALID_TYPE;
+        compatibilityMatrix[VARIANT.ordinal()][DECIMAL32.ordinal()] = PrimitiveType.INVALID_TYPE;
+        compatibilityMatrix[VARIANT.ordinal()][DECIMAL64.ordinal()] = PrimitiveType.INVALID_TYPE;
+        compatibilityMatrix[VARIANT.ordinal()][DECIMAL128.ordinal()] = PrimitiveType.INVALID_TYPE;
+        compatibilityMatrix[VARIANT.ordinal()][UNKNOWN_TYPE.ordinal()] = PrimitiveType.INVALID_TYPE;
+
         // Check all the necessary entries that should be filled.
         // ignore binary
         for (int i = 0; i < PrimitiveType.values().length - 2; ++i) {
@@ -776,7 +793,7 @@ public abstract class Type implements Cloneable {
     public boolean canApplyToNumeric() {
         // TODO(mofei) support sum, avg for JSON
         return !isOnlyMetricType() && !isJsonType() && !isFunctionType() && !isBinaryType() && !isStructType() &&
-                !isMapType() && !isArrayType();
+                !isMapType() && !isArrayType() && !isVariantType();
     }
 
     public boolean canJoinOn() {
@@ -795,7 +812,8 @@ public abstract class Type implements Cloneable {
             return true;
         }
 
-        return !isOnlyMetricType() && !isJsonType() && !isFunctionType() && !isBinaryType();
+        return !isOnlyMetricType() && !isJsonType() && !isFunctionType() && !isBinaryType() &&
+                !isVariantType();
     }
 
     public boolean canGroupBy() {
@@ -813,7 +831,8 @@ public abstract class Type implements Cloneable {
             }
             return true;
         }
-        return !isOnlyMetricType() && !isJsonType() && !isFunctionType() && !isBinaryType();
+        return !isOnlyMetricType() && !isJsonType() && !isFunctionType() && !isBinaryType() &&
+                !isVariantType();
     }
 
     public boolean canOrderBy() {
@@ -822,7 +841,7 @@ public abstract class Type implements Cloneable {
             return ((ArrayType) this).getItemType().canOrderBy();
         }
         return !isOnlyMetricType() && !isJsonType() && !isFunctionType() && !isBinaryType() && !isStructType() &&
-                !isMapType();
+                !isMapType() && !isVariantType();
     }
 
     public boolean canPartitionBy() {
@@ -831,7 +850,7 @@ public abstract class Type implements Cloneable {
             return ((ArrayType) this).getItemType().canPartitionBy();
         }
         return !isOnlyMetricType() && !isJsonType() && !isFunctionType() && !isBinaryType() && !isStructType() &&
-                !isMapType();
+                !isMapType() && !isVariantType();
     }
 
     public boolean canDistinct() {
@@ -846,19 +865,19 @@ public abstract class Type implements Cloneable {
             return ((MapType) this).getKeyType().canDistinct() && ((MapType) this).getValueType().canDistinct();
         }
         return !isOnlyMetricType() && !isJsonType() && !isFunctionType() && !isBinaryType() && !isStructType() &&
-                !isMapType();
+                !isMapType() && !isVariantType();
     }
 
     public boolean canStatistic() {
         // TODO(mofei) support statistic by for JSON
         return !isOnlyMetricType() && !isJsonType() && !isStructType() && !isFunctionType()
-                && !isBinaryType();
+                && !isBinaryType() && !isVariantType();
     }
 
     public boolean canDistributedBy() {
         // TODO(mofei) support distributed by for JSON
         return !isComplexType() && !isFloatingPointType() && !isOnlyMetricType() && !isJsonType()
-                && !isFunctionType() && !isBinaryType();
+                && !isFunctionType() && !isBinaryType() && !isVariantType();
     }
 
     public boolean canBeWindowFunctionArgumentTypes() {

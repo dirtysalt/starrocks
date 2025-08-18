@@ -120,6 +120,16 @@ public enum PrimitiveType {
     public static final ImmutableList<PrimitiveType> JSON_UNCOMPATIBLE_TYPE =
             ImmutableList.of(DATE, DATETIME, TIME, HLL, BITMAP, PERCENTILE, FUNCTION, VARBINARY);
 
+    public static final ImmutableList<PrimitiveType> VARIANT_COMPATIBLE_TYPE =
+            new ImmutableList.Builder<PrimitiveType>()
+                    .add(BOOLEAN)
+                    .addAll(NUMBER_TYPE_LIST)
+                    .addAll(STRING_TYPE_LIST)
+                    .build();
+
+    public static final ImmutableList<PrimitiveType> VARIANT_UNCOMPATIBLE_TYPE =
+            ImmutableList.of(DATE, DATETIME, TIME, HLL, BITMAP, PERCENTILE, FUNCTION, VARBINARY);
+
     private static final ImmutableList<PrimitiveType> TIME_TYPE_LIST =
             ImmutableList.of(TIME, DATE, DATETIME);
 
@@ -442,6 +452,7 @@ public enum PrimitiveType {
                 typeSize = 1024 * 1024;
                 break;
             case JSON:
+            case VARIANT:
                 typeSize = 1024;
                 break;
             default:

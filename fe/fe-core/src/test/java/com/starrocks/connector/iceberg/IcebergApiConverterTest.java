@@ -95,8 +95,8 @@ public class IcebergApiConverterTest {
     @Test
     public void testVariant() {
         Type variantType = fromIcebergType(Types.VariantType.get());
-        Assert.assertTrue(variantType.isVariantType());
-        Assert.assertEquals(ScalarType.createType(PrimitiveType.VARIANT), variantType);
+        Assertions.assertTrue(variantType.isVariantType());
+        Assertions.assertEquals(variantType, ScalarType.createType(PrimitiveType.VARIANT));
     }
 
     @Test

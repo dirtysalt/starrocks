@@ -187,4 +187,55 @@ PARALLEL_TEST(VariantColumnTest, put_mysql_row_buffer) {
     EXPECT_EQ("\n1234567890", buf.data());
 }
 
+// NOLINTNEXTLINE
+PARALLEL_TEST(VariantColumnTest, test_create_variant_column) {
+    auto variant_column = VariantColumn::create();
+
+    // Test basic column operations that exercise visitor patterns
+    EXPECT_EQ(0, variant_column->size());
+    EXPECT_TRUE(variant_column->empty());
+    EXPECT_FALSE(variant_column->is_nullable());
+    EXPECT_FALSE(variant_column->is_constant());
+
+    // Test column cloning which uses visitor patterns internally
+    auto cloned = variant_column->clone();
+    EXPECT_EQ(0, cloned->size());
+
+    // Test memory operations
+    size_t memory_usage = variant_column->memory_usage();
+    EXPECT_GE(memory_usage, 0);
+}
+
+// NOLINTNEXTLINE
+PARALLEL_TEST(VariantColumnTest, test_append_strings) {
+    const auto variant_column = VariantColumn::create();
+    const uint8_t int1_value[] = {primitiveHeader(VariantPrimitiveType::INT8), 0x01};
+    const std::string_view int1_value_str(reinterpret_cast<const char*>(int1_value), sizeof(int1_value));
+    constexpr uint32_t int1_total_size = sizeof(int1_value) + VariantMetadata::kEmptyMetadata.size();
+    std::string variant_string;
+    variant_string.resize(int1_total_size + sizeof(uint32_t));
+    memcpy(variant_string.data(), &int1_total_size, sizeof(uint32_t));
+    memcpy(variant_string.data() + sizeof(uint32_t), VariantMetadata::kEmptyMetadata.data(),
+           VariantMetadata::kEmptyMetadata.size());
+    memcpy(variant_string.data() + sizeof(uint32_t) + VariantMetadata::kEmptyMetadata.size(), int1_value_str.data(),
+           int1_value_str.size());
+    const Slice slice(variant_string.data(), variant_string.size());
+    variant_column->append_strings(&slice, 1);
+
+    ASSERT_EQ(1, variant_column->size());
+    auto expected = VariantValue::create(slice);
+    ASSERT_TRUE(expected.ok());
+    const VariantValue* actual = variant_column->get_object(0);
+    ASSERT_EQ(expected->serialize_size(), actual->serialize_size());
+    ASSERT_EQ(expected->get_metadata(), actual->get_metadata());
+    ASSERT_EQ(expected->get_value(), actual->get_value());
+    EXPECT_EQ(expected->to_string(), actual->to_string());
+    EXPECT_EQ("1", actual->to_string());
+
+    // Append bad data
+    const Slice bad_slice("");
+    const bool result = variant_column->append_strings(&bad_slice, 1);
+    ASSERT_FALSE(result) << "Appending empty slice should fail";
+}
+
 } // namespace starrocks

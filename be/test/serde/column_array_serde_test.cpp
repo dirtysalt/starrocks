@@ -147,6 +147,28 @@ PARALLEL_TEST(ColumnArraySerdeTest, variant_column) {
 }
 
 // NOLINTNEXTLINE
+PARALLEL_TEST(ColumnArraySerdeTest, variant_column_failed_deserialize) {
+    auto c1 = VariantColumn::create();
+    ASSERT_EQ(4, ColumnArraySerde::max_serialized_size(*c1));
+
+    // Prepare a variant value with an unsupported version
+    constexpr uint8_t v2_metadata_charts[] = {0x02, 0x00, 0x00};
+    const std::string_view v2_metadata(reinterpret_cast<const char*>(v2_metadata_charts), sizeof(v2_metadata_charts));
+    const VariantValue variant(v2_metadata, "");
+    c1->append(&variant);
+    ASSERT_EQ(1, c1->size());
+
+    std::vector<uint8_t> buffer;
+    buffer.resize(ColumnArraySerde::max_serialized_size(*c1));
+    ColumnArraySerde::serialize(*c1, buffer.data());
+
+    auto c2 = VariantColumn::create();
+    auto p2 = ColumnArraySerde::deserialize(buffer.data(), c2.get());
+    ASSERT_TRUE(p2 == nullptr); // Deserialization should fail due to empty value
+    ASSERT_EQ(0, c2->size());   // Deserialization should fail, resulting in an empty column
+}
+
+// NOLINTNEXTLINE
 PARALLEL_TEST(ColumnArraySerdeTest, decimal_column) {
     auto c1 = DecimalColumn::create();
 

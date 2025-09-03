@@ -410,7 +410,7 @@ public:
         return buff;
     }
 
-    static const uint8_t* deserialize(const uint8_t* buff, VariantColumn* column) {
+    static StatusOr<const uint8_t*> deserialize(const uint8_t* buff, VariantColumn* column) {
         uint32_t num_objects = 0;
         buff = read_little_endian_32(buff, &num_objects);
         column->reset_column();
@@ -419,7 +419,13 @@ public:
         for (int i = 0; i < num_objects; ++i) {
             uint64_t serialized_size = 0;
             buff = read_little_endian_64(buff, &serialized_size);
-            pool.emplace_back(Slice(buff, serialized_size));
+            auto variant = VariantValue::create(Slice(buff, serialized_size));
+            if (!variant.ok()) {
+                return Status::Corruption(fmt::format("Failed to deserialize VariantValue at index {}: {}", i,
+                                                      variant.status().to_string()));
+            }
+
+            pool.emplace_back(std::move(variant.value()));
             buff += serialized_size;
         }
 
@@ -738,7 +744,12 @@ public:
     }
 
     Status do_visit(VariantColumn* column) {
-        _cur = VariantColumnSerde::deserialize(_cur, column);
+        auto v = VariantColumnSerde::deserialize(_cur, column);
+        if (!v.ok()) {
+            return v.status();
+        }
+
+        _cur = v.value();
         return Status::OK();
     }
 

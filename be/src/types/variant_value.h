@@ -26,29 +26,18 @@ namespace starrocks {
 
 class VariantValue {
 public:
-    VariantValue(const std::string_view metadata, const std::string_view value) : _metadata(metadata), _value(value) {
-        if (auto status = validate_metadata(_metadata); !status.ok()) {
-            throw std::runtime_error("Invalid metadata: " + status.to_string());
-        }
-
-        if (_value.empty()) {
-            throw std::runtime_error("Value cannot be empty");
-        }
-    }
-
-    VariantValue(std::string metadata, std::string value) : _metadata(std::move(metadata)), _value(std::move(value)) {
-        if (auto status = validate_metadata(_metadata); !status.ok()) {
-            throw std::runtime_error("Invalid metadata: " + status.to_string());
-        }
-
-        if (_value.empty()) {
-            throw std::runtime_error("Value cannot be empty");
-        }
-    }
-
-    explicit VariantValue(const Slice& slice);
-
+    VariantValue(const std::string_view metadata, const std::string_view value) : _metadata(metadata), _value(value) {}
+    VariantValue(std::string metadata, std::string value) : _metadata(std::move(metadata)), _value(std::move(value)) {}
     VariantValue() = default;
+
+    /**
+     * Static factory method to create a VariantValue from a Slice.
+     * @param slice The Slice must contain the full variant binary including size header.
+     * The first 4 bytes of the Slice are expected to be the size of the variant.
+     * The memory layout is: [total size (4 bytes)][metadata][value].
+     * @return The created VariantValue or an error status.
+     */
+    static StatusOr<VariantValue> create(const Slice& slice);
 
     VariantValue(const VariantValue& rhs) = default;
 
@@ -64,7 +53,7 @@ public:
 
     // Load metadata from the variant binary.
     // will slice the variant binary to extract metadata
-    StatusOr<std::string_view> load_metadata(std::string_view variant) const;
+    static StatusOr<std::string_view> load_metadata(std::string_view variant);
 
     // Serialize the VariantValue to a byte array.
     // return the number of bytes written
@@ -72,7 +61,7 @@ public:
 
     // Calculate the size of the serialized VariantValue.
     // 4 bytes for value size + metadata size + value size
-    uint64_t serialize_size() const;
+    uint32_t serialize_size() const;
 
     uint64_t mem_usage() const { return serialize_size(); }
 
@@ -83,12 +72,16 @@ public:
     std::string get_metadata() const { return _metadata; }
     std::string get_value() const { return _value; }
 
+    // Variant value has a maximum size limit of 16MB to prevent excessive memory usage.
+    static constexpr uint32_t kMaxVariantSize = 16 * 1024 * 1024;
+
 private:
     static constexpr uint8_t kVersionMask = 0b1111;
     static constexpr uint8_t kSortedStrings = 0b10000;
     static constexpr uint8_t kOffsetSizeMask = 0b11000000;
     static constexpr uint8_t kOffsetSizeShift = 6;
     static constexpr uint8_t kHeaderSize = 1;
+    static constexpr size_t kMinMetadataSize = 3;
 
     // Now directly store strings instead of string_views
     std::string _metadata;

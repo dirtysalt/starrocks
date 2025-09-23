@@ -790,6 +790,44 @@ TEST_F(ParquetScannerTest, test_variant) {
     };
 
     validate(scanner, 24, check);
+
+    std::vector<std::string> expected{
+            "{boolean_false_field:false,boolean_true_field:true,double_field:1.23456789,int_field:1,null_field:null,"
+            "string_field:Apache Parquet,timestamp_field:2025-04-16T12:34:56.78}",
+            "This string is longer than 64 bytes and therefore does not fit in a short_string and it also includes "
+            "several non ascii characters such as 🐢, 💖, ♥️, 🎣 and 🤦!!",
+            "{id:1,observation:{location:In the "
+            "Volcano,time:12:34:56,value:{humidity:456,temperature:123}},species:{name:lava monster,population:6789}}",
+            "[{id:1,thing:{names:[Contrarian,Spider]}},null,{id:2,names:[Apple,Ray,null],type:if}]",
+            "Less than 64 bytes (❤️ with utf8)",
+            "12345678912345678.90",
+            "\"2025-04-16 12:34:56.780000\"",
+            "\"2025-04-16 04:34:56.78+00:00\"",
+            "[2,1,5,9]",
+            "\"AxM33q2+78r+\"",
+            "12345678.90",
+            "1234567890.123400",
+            "1234567890123456789",
+            "true",
+            "12.34",
+            "false",
+            "\"2025-04-16\"",
+            "123456",
+            "1234567936.000000",
+            "1234",
+            "42",
+            "{}",
+            "[]",
+            "NULL"};
+    std::unordered_map<size_t, TExpr> dst_slot_exprs;
+    ChunkPtr chunk_ptr = get_chunk<true>(column, dst_slot_exprs, variant_file_name[0], 24);
+    ASSERT_EQ(1, chunk_ptr->num_columns());
+    auto col = chunk_ptr->columns()[0];
+    for (int i = 0; i < col->size(); i++) {
+        std::string result = col->debug_item(i);
+        ASSERT_TRUE(!result.empty());
+        EXPECT_EQ(expected[i], result) << "Mismatch at row " << i;
+    }
 }
 
 TEST_F(ParquetScannerTest, optional_map_key) {

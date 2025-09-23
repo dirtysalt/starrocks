@@ -59,6 +59,11 @@ StatusOr<ColumnReaderPtr> ColumnReaderFactory::create(const ColumnReaderOptions&
             return nullptr;
         }
     } else if (field->type == ColumnType::STRUCT) {
+        if (col_type.type == LogicalType::TYPE_VARIANT) {
+            DCHECK(opts.row_group_meta != nullptr);
+            return std::make_unique<VariantColumnReader>(field, opts.row_group_meta->columns.data(), opts);
+        }
+
         std::vector<int32_t> subfield_pos(col_type.children.size());
         get_subfield_pos_with_pruned_type(*field, col_type, opts.case_sensitive, subfield_pos);
 
@@ -128,6 +133,11 @@ StatusOr<ColumnReaderPtr> ColumnReaderFactory::create(const ColumnReaderOptions&
             return nullptr;
         }
     } else if (field->type == ColumnType::STRUCT) {
+        if (col_type.type == LogicalType::TYPE_VARIANT) {
+            DCHECK(opts.row_group_meta != nullptr);
+            return std::make_unique<VariantColumnReader>(field, opts.row_group_meta->columns.data(), opts);
+        }
+
         std::vector<int32_t> subfield_pos(col_type.children.size());
         std::vector<const TIcebergSchemaField*> lake_schema_subfield(col_type.children.size());
         get_subfield_pos_with_pruned_type(*field, col_type, opts.case_sensitive, lake_schema_field, subfield_pos,

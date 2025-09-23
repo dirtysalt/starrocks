@@ -55,8 +55,10 @@ void VariantColumn::put_mysql_row_buffer(MysqlRowBuffer* buf, size_t idx, bool i
 
     auto json = variant->to_json();
     if (!json.ok()) {
+        LOG(WARNING) << "Failed to convert variant to JSON: " << json.status();
         buf->push_null();
     } else {
+        LOG(INFO) << "Convert variant to JSON: " << json.value();
         buf->push_string(json->data(), json->size(), '\'');
     }
 }
@@ -79,6 +81,17 @@ void VariantColumn::append(const VariantValue* object) {
 
 void VariantColumn::append(VariantValue&& object) {
     BaseClass::append(std::move(object));
+}
+
+bool VariantColumn::append_nulls(size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        append(VariantValue::of_null());
+    }
+    return true;
+}
+
+std::string VariantColumn::debug_item(size_t idx) const {
+    return get_object(idx)->to_string();
 }
 
 } // namespace starrocks

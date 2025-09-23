@@ -335,6 +335,32 @@ static Status try_to_infer_struct_type(const ::parquet::schema::NodePtr& node, T
         RETURN_IF_ERROR(get_parquet_type(field, &field_type_desc));
     }
 
+    // Check if the group is a variant type
+    // TODO: replace with parquet variant logical type when it is supported
+    if (field_count == 2 || field_count == 3) {
+        int metadata_index = -1;
+        int value_index = -1;
+        for (size_t i = 0; i < field_names.size(); ++i) {
+            if (field_names[i] == "value") {
+                metadata_index = i;
+            } else if (field_names[i] == "metadata") {
+                value_index = i;
+            }
+        }
+        // The variant type must have both 'metadata' and 'value' fields
+        if (metadata_index == -1 || value_index == -1) {
+            *type_desc = TypeDescriptor::create_struct_type(field_names, field_types);
+            return Status::OK();
+        }
+
+        const auto& metadata_type = field_types[metadata_index];
+        const auto& value_type = field_types[value_index];
+        if (metadata_type.type == value_type.type && metadata_type.type == TYPE_VARBINARY) {
+            *type_desc = TypeDescriptor::create_variant_type();
+            return Status::OK();
+        }
+    }
+
     *type_desc = TypeDescriptor::create_struct_type(field_names, field_types);
 
     return Status::OK();

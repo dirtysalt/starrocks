@@ -60,8 +60,7 @@ StatusOr<ColumnReaderPtr> ColumnReaderFactory::create(const ColumnReaderOptions&
         }
     } else if (field->type == ColumnType::STRUCT) {
         if (col_type.type == LogicalType::TYPE_VARIANT) {
-            DCHECK(opts.row_group_meta != nullptr);
-            return std::make_unique<VariantColumnReader>(field, opts.row_group_meta->columns.data(), opts);
+            return create_variant_column_reader(opts, field);
         }
 
         std::vector<int32_t> subfield_pos(col_type.children.size());
@@ -134,8 +133,7 @@ StatusOr<ColumnReaderPtr> ColumnReaderFactory::create(const ColumnReaderOptions&
         }
     } else if (field->type == ColumnType::STRUCT) {
         if (col_type.type == LogicalType::TYPE_VARIANT) {
-            DCHECK(opts.row_group_meta != nullptr);
-            return std::make_unique<VariantColumnReader>(field, opts.row_group_meta->columns.data(), opts);
+            return create_variant_column_reader(opts, field);
         }
 
         std::vector<int32_t> subfield_pos(col_type.children.size());
@@ -167,6 +165,37 @@ StatusOr<ColumnReaderPtr> ColumnReaderFactory::create(const ColumnReaderOptions&
         return std::make_unique<ScalarColumnReader>(field, &opts.row_group_meta->columns[field->physical_column_index],
                                                     &col_type, opts);
     }
+}
+
+StatusOr<ColumnReaderPtr> ColumnReaderFactory::create_variant_column_reader(const ColumnReaderOptions& opts,
+                                                                            const ParquetField* variant_field) {
+    DCHECK(opts.row_group_meta != nullptr);
+    DCHECK(variant_field->type == ColumnType::STRUCT);
+    DCHECK(variant_field->children.size() >= 2);
+
+    int metadata_index = -1;
+    int value_index = -1;
+    for (size_t i = 0; i < variant_field->children.size(); ++i) {
+        const auto& child = variant_field->children[i];
+        if (child.name == "metadata") {
+            metadata_index = i;
+        } else if (child.name == "value") {
+            value_index = i;
+        }
+    }
+    if (metadata_index == -1 || value_index == -1) {
+        return Status::InvalidArgument("Variant type must have 'metadata' and 'value' fields");
+    }
+
+    const tparquet::ColumnChunk* column_chunks = opts.row_group_meta->columns.data();
+    // Use pointers to the original ParquetField objects to avoid stack-use-after-return
+    const ParquetField* metadata_field = &variant_field->children[metadata_index];
+    const ParquetField* value_field = &variant_field->children[value_index];
+    auto _metadata_reader = std::make_unique<ScalarColumnReader>(
+            metadata_field, &(column_chunks[metadata_field->physical_column_index]), &TYPE_VARBINARY_DESC, opts);
+    auto _value_reader = std::make_unique<ScalarColumnReader>(
+            value_field, &(column_chunks[value_field->physical_column_index]), &TYPE_VARBINARY_DESC, opts);
+    return std::make_unique<VariantColumnReader>(variant_field, std::move(_metadata_reader), std::move(_value_reader));
 }
 
 StatusOr<ColumnReaderPtr> ColumnReaderFactory::create(ColumnReaderPtr ori_reader, const GlobalDictMap* dict,

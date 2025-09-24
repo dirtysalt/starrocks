@@ -250,41 +250,22 @@ private:
 
 class VariantColumnReader final : public ColumnReader {
 public:
-    explicit VariantColumnReader(const ParquetField* parquet_field, const tparquet::ColumnChunk* column_chunks,
-                                 const ColumnReaderOptions& opts)
-            : ColumnReader(parquet_field), _opts(opts), _column_chunks(column_chunks) {}
+    // Constructor that accepts pre-built ScalarColumnReader objects
+    explicit VariantColumnReader(const ParquetField* parquet_field,
+                                std::unique_ptr<ScalarColumnReader>&& metadata_reader,
+                                std::unique_ptr<ScalarColumnReader>&& value_reader)
+            : ColumnReader(parquet_field),
+              _metadata_reader(std::move(metadata_reader)),
+              _value_reader(std::move(value_reader)) {}
+
     ~VariantColumnReader() override = default;
 
     Status prepare() override {
-        const ParquetField* variant_field = get_column_parquet_field();
-        DCHECK(variant_field->type == ColumnType::STRUCT);
-        DCHECK(variant_field->children.size() >= 2);
-
-        int metadata_index = -1;
-        int value_index = -1;
-        for (size_t i = 0; i < variant_field->children.size(); ++i) {
-            const auto& child = variant_field->children[i];
-            if (child.name == "metadata") {
-                metadata_index = i;
-            } else if (child.name == "value") {
-                value_index = i;
-            }
+        if (_metadata_reader == nullptr || _value_reader == nullptr) {
+            return Status::InternalError("VariantColumnReader: metadata or value reader is null");
         }
-        if (metadata_index == -1 || value_index == -1) {
-            return Status::InvalidArgument("Variant type must have 'metadata' and 'value' fields");
-        }
-
-        // Store the ParquetField objects as member variables to avoid stack-use-after-return
-        _metadata_field = variant_field->children[metadata_index];
-        _value_field = variant_field->children[value_index];
-        TypeDescriptor binary_type = TypeDescriptor::create_varbinary_type(VariantValue::kMaxVariantSize);
-        _metadata_reader = std::make_unique<ScalarColumnReader>(
-                &_metadata_field, &(_column_chunks[_metadata_field.physical_column_index]), &binary_type, _opts);
-        _value_reader = std::make_unique<ScalarColumnReader>(
-                &_value_field, &(_column_chunks[_value_field.physical_column_index]), &binary_type, _opts);
         RETURN_IF_ERROR(_metadata_reader->prepare());
         RETURN_IF_ERROR(_value_reader->prepare());
-
         return Status::OK();
     }
 
@@ -292,35 +273,50 @@ public:
 
     void get_levels(level_t** def_levels, level_t** rep_levels, size_t* num_levels) override {
         // Use value reader to get levels since it determines nullability
+        // Check if reader is initialized to prevent null pointer dereference
+        if (_value_reader == nullptr) {
+            if (def_levels) *def_levels = nullptr;
+            if (rep_levels) *rep_levels = nullptr;
+            if (num_levels) *num_levels = 0;
+            return;
+        }
         _value_reader->get_levels(def_levels, rep_levels, num_levels);
     }
 
     void set_need_parse_levels(bool need_parse_levels) override {
-        _metadata_reader->set_need_parse_levels(need_parse_levels);
-        _value_reader->set_need_parse_levels(need_parse_levels);
+        // Check if readers are initialized to prevent null pointer dereference
+        if (_metadata_reader != nullptr) {
+            _metadata_reader->set_need_parse_levels(need_parse_levels);
+        }
+        if (_value_reader != nullptr) {
+            _value_reader->set_need_parse_levels(need_parse_levels);
+        }
     }
 
     void collect_column_io_range(std::vector<io::SharedBufferedInputStream::IORange>* ranges, int64_t* end_offset,
                                  ColumnIOTypeFlags types, bool active) override {
+        // Check if readers are initialized to prevent null pointer dereference
+        // collect_column_io_range might be called before prepare()
+        if (_metadata_reader == nullptr || _value_reader == nullptr) {
+            return;
+        }
         _metadata_reader->collect_column_io_range(ranges, end_offset, types, active);
         _value_reader->collect_column_io_range(ranges, end_offset, types, active);
     }
 
     void select_offset_index(const SparseRange<uint64_t>& range, const uint64_t rg_first_row) override {
-        _metadata_reader->select_offset_index(range, rg_first_row);
-        _value_reader->select_offset_index(range, rg_first_row);
+        // Check if readers are initialized to prevent null pointer dereference
+        if (_metadata_reader != nullptr) {
+            _metadata_reader->select_offset_index(range, rg_first_row);
+        }
+        if (_value_reader != nullptr) {
+            _value_reader->select_offset_index(range, rg_first_row);
+        }
     }
 
 private:
     std::unique_ptr<ScalarColumnReader> _metadata_reader;
     std::unique_ptr<ScalarColumnReader> _value_reader;
-
-    const ColumnReaderOptions& _opts;
-    const tparquet::ColumnChunk* _column_chunks;
-
-    // Store ParquetField objects as members to avoid stack-use-after-return
-    ParquetField _metadata_field;
-    ParquetField _value_field;
 };
 
 } // namespace starrocks::parquet

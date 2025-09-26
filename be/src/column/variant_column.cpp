@@ -55,10 +55,8 @@ void VariantColumn::put_mysql_row_buffer(MysqlRowBuffer* buf, size_t idx, bool i
 
     auto json = variant->to_json();
     if (!json.ok()) {
-        LOG(WARNING) << "Failed to convert variant to JSON: " << json.status();
         buf->push_null();
     } else {
-        LOG(INFO) << "Convert variant to JSON: " << json.value();
         buf->push_string(json->data(), json->size(), '\'');
     }
 }

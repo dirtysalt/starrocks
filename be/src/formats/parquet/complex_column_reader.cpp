@@ -661,69 +661,78 @@ Status VariantColumnReader::read_range(const Range<uint64_t>& range, const Filte
         variant_column = down_cast<VariantColumn*>(dst.get());
     }
 
-    ColumnPtr metadata_col = BinaryColumn::create();
-    ColumnPtr value_col = BinaryColumn::create();
+    ColumnPtr metadata_col = NullableColumn::create(BinaryColumn::create(), NullColumn::create());
+    ColumnPtr value_col = NullableColumn::create(BinaryColumn::create(), NullColumn::create());
     RETURN_IF_ERROR(_metadata_reader->read_range(range, filter, metadata_col));
     RETURN_IF_ERROR(_value_reader->read_range(range, filter, value_col));
 
-    const auto* metadata_column = down_cast<BinaryColumn*>(metadata_col.get());
-    const auto* value_column = down_cast<BinaryColumn*>(value_col.get());
+    auto* metadata_nullable = down_cast<NullableColumn*>(metadata_col.get());
+    auto* value_nullable = down_cast<NullableColumn*>(value_col.get());
+    const auto* metadata_column = down_cast<const BinaryColumn*>(metadata_nullable->data_column().get());
+    const auto* value_column = down_cast<const BinaryColumn*>(value_nullable->data_column().get());
 
     // Get definition levels to determine which variant groups are null
     level_t* def_levels = nullptr;
     level_t* rep_levels = nullptr;
     size_t num_levels = 0;
-    _metadata_reader->get_levels(&def_levels, &rep_levels, &num_levels);
+    _value_reader->get_levels(&def_levels, &rep_levels, &num_levels);
     // Use definition levels to determine null values
     const LevelInfo level_info = get_column_parquet_field()->level_info;
 
     DCHECK_EQ(metadata_column->size(), value_column->size());
 
-    const size_t requested_rows = range.span_size();
+    const size_t expected_size = range.span_size();
     const size_t actual_rows = metadata_column->size();
-    variant_column->reserve(requested_rows);
+    variant_column->reserve(expected_size);
+
+    auto append_variant_column = [&](const size_t idx) {
+        const Slice metadata_slice = metadata_column->get_slice(idx);
+        const Slice value_slice = value_column->get_slice(idx);
+        variant_column->append(VariantValue(std::string(metadata_slice.data, metadata_slice.size),
+                                            std::string(value_slice.data, value_slice.size)));
+    };
 
     if (def_levels != nullptr && num_levels > 0) {
         size_t data_idx = 0;
-
-        for (size_t i = 0; i < requested_rows && i < num_levels; ++i) {
+        for (size_t i = 0; i < expected_size && i < num_levels; ++i) {
             if (def_levels[i] >= level_info.max_def_level) {
                 if (data_idx < actual_rows) {
-                    const Slice metadata_slice = metadata_column->get_slice(data_idx);
-                    const Slice value_slice = value_column->get_slice(data_idx);
-
-                    const std::string_view metadata_view(metadata_slice.data, metadata_slice.size);
-                    const std::string_view value_view(value_slice.data, value_slice.size);
-
-                    VariantValue variant_value(metadata_view, value_view);
-                    variant_column->append(variant_value);
+                    append_variant_column(data_idx);
                     data_idx++;
                 } else {
                     variant_column->append(VariantValue::of_null());
                 }
             } else {
-                // Variant group is null at definition level
                 variant_column->append(VariantValue::of_null());
             }
         }
 
-        // If we still have fewer rows than requested, fill with nulls
-        if (size_t current_size = variant_column->size(); current_size < requested_rows) {
-            size_t to_fill = requested_rows - current_size;
+        // If we still have fewer rows than expected, fill with nulls
+        if (size_t current_size = variant_column->size(); current_size < expected_size) {
+            size_t to_fill = expected_size - current_size;
             variant_column->append_nulls(to_fill);
         }
     } else {
-        return Status::InternalError("Definition levels are required for Variant column");
+        // Variant group is required, so all rows are non-null
+        for (size_t i = 0; i < actual_rows; ++i) {
+            append_variant_column(i);
+        }
+
+        DCHECK_EQ(actual_rows, expected_size);
+        if (actual_rows < expected_size) {
+            size_t to_fill = expected_size - actual_rows;
+            variant_column->append_nulls(to_fill);
+        }
     }
 
     // Handle nullable column null flags
     if (dst->is_nullable()) {
         DCHECK(nullable_column != nullptr);
         if (def_levels != nullptr && num_levels > 0) {
-            NullColumn null_column(requested_rows);
+            NullColumn null_column(expected_size);
             auto& is_nulls = null_column.get_data();
             bool has_null = false;
-            for (size_t i = 0; i < requested_rows && i < num_levels; ++i) {
+            for (size_t i = 0; i < expected_size && i < num_levels; ++i) {
                 if (def_levels[i] >= level_info.max_def_level) {
                     is_nulls[i] = 0; // Variant group exists
                 } else {
@@ -732,7 +741,7 @@ Status VariantColumnReader::read_range(const Range<uint64_t>& range, const Filte
                 }
             }
 
-            for (size_t i = num_levels; i < requested_rows; ++i) {
+            for (size_t i = num_levels; i < expected_size; ++i) {
                 is_nulls[i] = 1;
                 has_null = true;
             }
@@ -740,7 +749,7 @@ Status VariantColumnReader::read_range(const Range<uint64_t>& range, const Filte
             nullable_column->mutable_null_column()->swap_column(null_column);
             nullable_column->set_has_null(has_null);
         } else {
-            NullColumn null_column(requested_rows, 0);
+            NullColumn null_column(expected_size, 0);
             nullable_column->mutable_null_column()->swap_column(null_column);
             nullable_column->set_has_null(false);
         }

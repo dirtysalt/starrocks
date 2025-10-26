@@ -1539,6 +1539,8 @@ public class ConnectContext {
                 row.add(Boolean.toString(isPending));
             }
             row.add(sessionVariable.getWarehouseName());
+            row.add(sessionVariable.getCatalog());
+            row.add(queryId == null ? null : queryId.toString());
             return row;
         }
     }

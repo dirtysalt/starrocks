@@ -1970,6 +1970,8 @@ struct TConnectionInfo {
     9: optional string info;
     10: optional string isPending;
     11: optional string warehouse;
+    12: optional string catalog;
+    13: optional string queryId;
 }
 
 struct TListConnectionResponse {

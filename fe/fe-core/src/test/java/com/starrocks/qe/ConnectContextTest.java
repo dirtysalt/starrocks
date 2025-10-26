@@ -139,7 +139,7 @@ public class ConnectContextTest {
         Assertions.assertNotNull(ctx.toThreadInfo());
         long currentTimeMillis = System.currentTimeMillis();
         List<String> row = ctx.toThreadInfo().toRow(currentTimeMillis, false);
-        Assertions.assertEquals(11, row.size());
+        Assertions.assertEquals(13, row.size());
         Assertions.assertEquals("101", row.get(0));
         Assertions.assertEquals("testUser", row.get(1));
         Assertions.assertEquals("127.0.0.1:12345", row.get(2));

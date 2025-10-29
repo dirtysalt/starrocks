@@ -15,8 +15,6 @@
 #pragma once
 
 #include "column/column.h"
-#include "column/column_builder.h"
-#include "column/column_viewer.h"
 #include "common/statusor.h"
 #include "formats/parquet/variant.h"
 #include "function_helper.h"
@@ -38,10 +36,10 @@ public:
     // The scope indicates whether the state is shared across the plan fragment
     // (FRAGMENT_LOCAL) or local to the execution thread (THREAD_LOCAL).
     // Returns Status::OK() on success, or an error status if initialization fails.
-    static Status preload_variant_segments(FunctionContext* context, FunctionContext::FunctionStateScope scope);
+    static Status variant_segments_prepare(FunctionContext* context, FunctionContext::FunctionStateScope scope);
 
     // Clear the variant segments state.
-    static Status clear_variant_segments(FunctionContext* context, FunctionContext::FunctionStateScope scope);
+    static Status variant_segments_close(FunctionContext* context, FunctionContext::FunctionStateScope scope);
 
 private:
     template <LogicalType ResultType>

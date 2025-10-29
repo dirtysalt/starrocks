@@ -14,6 +14,7 @@
 
 #include "variant_path_parser.h"
 
+#include <fmt/format.h>
 #include <cctype>
 
 namespace starrocks {

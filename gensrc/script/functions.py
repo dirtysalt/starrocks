@@ -824,7 +824,7 @@ vectorized_functions = [
 
     # variant type function
     [110200, "variant_query", False, False, "VARIANT", ["VARIANT", "VARCHAR"], "VariantFunctions::variant_query",
-     "VariantFunctions::preload_variant_segments", "VariantFunctions::clear_variant_segments"],
+     "VariantFunctions::variant_segments_prepare", "VariantFunctions::variant_segments_close"],
 
     # aes and base64 function
     [120100, "aes_encrypt", False, False, "VARCHAR", ["VARCHAR", "VARCHAR"], "EncryptionFunctions::aes_encrypt"],

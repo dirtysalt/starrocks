@@ -16,7 +16,6 @@
 
 #include "common/status.h"
 #include "runtime/decimalv2_value.h"
-#include "types/variant_value.h"
 #include "util/decimal_types.h"
 
 namespace starrocks {
@@ -96,9 +95,8 @@ public:
     // return the field name for the index
     StatusOr<std::string_view> get_key(uint32_t index) const;
 
-    std::string_view get_raw_metadata() const {
-        return _metadata;
-    }
+    // return the metadata raw string view
+    std::string_view get_raw() const { return _metadata; }
 
     static constexpr char kEmptyMetadataChars[] = {0x1, 0x0, 0x0};
     static constexpr std::string_view kEmptyMetadata{kEmptyMetadataChars, sizeof(kEmptyMetadataChars)};
@@ -130,6 +128,7 @@ public:
 
     BasicType basic_type() const;
     const VariantMetadata& metadata() const;
+    std::string_view value() const;
     VariantType type() const;
 
     // Get the primitive boolean value.
@@ -181,11 +180,6 @@ public:
     // Get the variant value of the object field
     // returns the value of the field with the given field id
     StatusOr<Variant> get_element_at_index(uint32_t index) const;
-
-    StatusOr<VariantValue> to_value() const {
-        VariantValue value(_metadata.get_raw_metadata(), _value);
-        return value;
-    }
 
 private:
     uint8_t value_header() const;

@@ -19,7 +19,6 @@
 #include "column/column_builder.h"
 #include "column/column_helper.h"
 #include "column/column_viewer.h"
-#include "jsonpath.h"
 #include "runtime/runtime_state.h"
 #include "util/variant_converter.h"
 #include "variant_path_parser.h"
@@ -35,7 +34,7 @@ StatusOr<ColumnPtr> VariantFunctions::variant_query(FunctionContext* context, co
     return _do_variant_query<TYPE_VARIANT>(context, columns);
 }
 
-Status VariantFunctions::preload_variant_segments(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
+Status VariantFunctions::variant_segments_prepare(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
     if (scope != FunctionContext::FRAGMENT_LOCAL) {
         return Status::OK();
     }
@@ -78,7 +77,7 @@ static StatusOr<VariantPath*> get_or_parse_variant_segments(FunctionContext* con
     return variant_path;
 }
 
-Status VariantFunctions::clear_variant_segments(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
+Status VariantFunctions::variant_segments_close(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
     if (scope == FunctionContext::FRAGMENT_LOCAL) {
         auto* variant_path = reinterpret_cast<NativeVariantPath*>(context->get_function_state(scope));
         delete variant_path;
@@ -110,25 +109,22 @@ StatusOr<ColumnPtr> VariantFunctions::_do_variant_query(FunctionContext* context
             continue;
         }
 
-        auto variant_value = variant_viewer.value(row);
-
+        const VariantValue* variant_value = variant_viewer.value(row);
         if (!variant_value) {
             result.append_null();
             continue;
         }
 
-        auto metadata = variant_value->get_metadata();
-        auto value = variant_value->get_value();
-
-        if (metadata.empty() && value.empty()) {
+        const std::string& value = variant_value->get_value();
+        if (value.empty()) {
             result.append_null();
             continue;
         }
 
         try {
-            Variant variant(metadata, value);
-            auto variant_result = VariantPath::seek(&variant, variant_segments_status.value());
-            if (!variant_result.ok()) {
+            Variant variant(variant_value->get_metadata(), value);
+            StatusOr<Variant> variant_field = VariantPath::seek(&variant, variant_segments_status.value());
+            if (!variant_field.ok()) {
                 LOG(ERROR) << "Failed to seek variant path: " << path_slice.to_string()
                            << "in variant: " << variant_value->to_string();
                 result.append_null();
@@ -144,16 +140,10 @@ StatusOr<ColumnPtr> VariantFunctions::_do_variant_query(FunctionContext* context
             }
 
             if constexpr (ResultType == TYPE_VARIANT) {
-                // For TYPE_VARIANT, convert back to VariantValue
-                auto variant_value_result = variant_result.value().to_value();
-                if (!variant_value_result.ok()) {
-                    result.append_null();
-                    continue;
-                }
-
-                result.append(std::move(variant_value_result.value()));
+                VariantValue sub_variant_value = VariantValue::of_variant(variant_field.value());
+                result.append(std::move(sub_variant_value));
             } else {
-                Status status = cast_variant_value_to<ResultType, true>(variant_result.value(), zone, result);
+                Status status = cast_variant_value_to<ResultType, true>(variant_field.value(), zone, result);
                 if (!status.ok()) {
                     result.append_null();
                 }

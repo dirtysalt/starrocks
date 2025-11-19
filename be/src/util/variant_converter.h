@@ -23,6 +23,9 @@
 
 namespace starrocks {
 
+#define VARIANT_CAST_NOT_SUPPORT(type) \
+    Status::NotSupported(fmt::format("Cannot cast variant to type {}", logical_type_to_string(type)))
+
 StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& variant,
                                                             ColumnBuilder<TYPE_BOOLEAN>& result);
 
@@ -86,44 +89,66 @@ StatusOr<RunTimeColumnType<ResultType>> cast_variant_to_arithmetic(const Variant
         return Status::OK();
     }
     default:
-        return Status::NotSupported(fmt::format("Cannot cast variant of type {} to {}",
-                                                VariantUtil::type_to_string(type), logical_type_to_string(ResultType)));
+        return VARIANT_CAST_NOT_SUPPORT(ResultType);
     }
 }
+
+template <LogicalType DecimalType>
+StatusOr<RunTimeColumnType<DecimalType>> cast_variant_to_decimal(const Variant& variant,
+                                                                 ColumnBuilder<DecimalType>& result);
+
+StatusOr<RunTimeColumnType<TYPE_DATETIME>> cast_variant_to_datetime(const Variant& variant, const cctz::time_zone& zone,
+                                                                    ColumnBuilder<TYPE_DATETIME>& result);
+
+StatusOr<RunTimeColumnType<TYPE_DATE>> cast_variant_to_date(const Variant& variant, const cctz::time_zone& zone,
+                                                            ColumnBuilder<TYPE_DATE>& result);
 
 template <LogicalType ResultType, bool AllowThrowException>
 static Status cast_variant_value_to(const Variant& variant, const cctz::time_zone& zone,
                                     ColumnBuilder<ResultType>& result) {
-    if constexpr (!lt_is_arithmetic<ResultType> && !lt_is_string<ResultType> && ResultType != TYPE_VARIANT) {
+    if constexpr (!lt_is_arithmetic<ResultType> && !lt_is_string<ResultType> && !lt_is_decimal<ResultType> &&
+                  !lt_is_date_or_datetime<ResultType> && !lt_is_collection<ResultType> && ResultType != TYPE_VARIANT) {
         if constexpr (AllowThrowException) {
-            return Status::NotSupported(
-                    fmt::format("Cannot cast variant to type {}", logical_type_to_string(ResultType)));
+            return VARIANT_CAST_NOT_SUPPORT(ResultType);
         }
 
         result.append_null();
         return Status::OK();
     }
 
-    VariantValue variant_value = VariantValue::of_variant(variant);
-    if constexpr (ResultType == TYPE_VARIANT) {
-        result.append(std::move(variant_value));
+    if (variant.type() == VariantType::NULL_TYPE) {
+        result.append_null();
         return Status::OK();
     }
 
-    // For non-variant types, we need the VariantValue for string conversion
+    if constexpr (ResultType == TYPE_VARIANT) {
+        result.append(std::move(VariantValue::of_variant(variant)));
+        return Status::OK();
+    }
+
     Status status;
     if constexpr (ResultType == TYPE_BOOLEAN) {
         status = cast_variant_to_bool(variant, result);
     } else if constexpr (lt_is_arithmetic<ResultType>) {
         status = cast_variant_to_arithmetic<ResultType>(variant, result);
     } else if constexpr (lt_is_string<ResultType>) {
-        status = cast_variant_to_string(variant, variant_value, zone, result);
+        status = cast_variant_to_string(variant, zone, result);
+    } else if constexpr (lt_is_decimal<ResultType>) {
+        status = cast_variant_to_decimal(variant, result);
+    } else if constexpr (lt_is_date_or_datetime<ResultType>) {
+        if constexpr (ResultType == TYPE_DATETIME) {
+            status = cast_variant_to_datetime(variant, zone, result);
+        } else if constexpr (ResultType == TYPE_DATE) {
+            status = cast_variant_to_date(variant, zone, result);
+        }
+    } else if constexpr (lt_is_collection<ResultType>) {
+        status = cast_variant_to_collection<ResultType>(variant, zone, result);
     }
 
     if (!status.ok()) {
         if constexpr (AllowThrowException) {
-            return Status::VariantError(fmt::format("Cannot cast variant to type {}: {}",
-                                                    logical_type_to_string(ResultType), status.to_string()));
+            return Status::VariantError(
+                    fmt::format("Fail to cast variant: {}", logical_type_to_string(ResultType), status.to_string()));
         } else {
             result.append_null();
         }

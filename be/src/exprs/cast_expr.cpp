@@ -56,6 +56,7 @@
 #include "util/json_converter.h"
 #include "util/mysql_global.h"
 #include "util/numeric_types.h"
+#include "util/variant_converter.h"
 
 #ifdef STARROCKS_JIT_ENABLE
 #include "exprs/jit/ir_helper.h"
@@ -190,6 +191,18 @@ static ColumnPtr cast_to_json_fn(ColumnPtr& column) {
             auto v = viewer.value(row);
             std::string str = CastToString::apply<RunTimeCppType<FromType>, std::string>(v);
             value = JsonValue::from_string(str);
+        } else if constexpr (lt_is_variant<FromType>) {
+            auto json_str = static_cast<VariantValue*>(viewer.value(row))->to_json(cctz::local_time_zone());
+            if (!json_str.ok()) {
+                overflow = true;
+            } else {
+                auto parsed = JsonValue::parse_json_or_string(json_str.value());
+                if (parsed.ok()) {
+                    value = parsed.value();
+                } else {
+                    overflow = true;
+                }
+            }
         } else {
             if constexpr (AllowThrowException) {
                 THROW_RUNTIME_ERROR_WITH_TYPE(FromType);
@@ -237,6 +250,42 @@ static ColumnPtr cast_from_json_fn(ColumnPtr& column) {
     return builder.build(column->is_constant());
 }
 
+template <LogicalType FromType, LogicalType ToType, bool AllowThrowException>
+static ColumnPtr cast_from_variant_fn(ColumnPtr& column) {
+    ColumnViewer<TYPE_VARIANT> viewer(column);
+    ColumnBuilder<ToType> builder(viewer.size());
+
+    for (int row = 0; row < viewer.size(); ++row) {
+        if (viewer.is_null(row)) {
+            builder.append_null();
+            continue;
+        }
+
+        const VariantValue* variant_value = viewer.value(row);
+        if (variant_value == nullptr) {
+            builder.append_null();
+            continue;
+        }
+
+        Variant variant(variant_value->get_metadata(), variant_value->get_value());
+        Status status = cast_variant_value_to<ToType, AllowThrowException>(variant, cctz::local_time_zone(), builder);
+        if (!status.ok()) {
+            if constexpr (AllowThrowException) {
+                THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FromType, ToType, variant_value->to_string());
+            }
+            builder.append_null();
+        }
+    }
+
+    return builder.build(column->is_constant());
+}
+
+template <LogicalType FromType, LogicalType ToType, bool AllowThrowException>
+static ColumnPtr cast_to_variant_fn(ColumnPtr& column) {
+    // TODO: require to implement variant encoding
+    THROW_RUNTIME_ERROR_WITH_TYPE(ToType);
+}
+
 SELF_CAST(TYPE_BOOLEAN);
 UNARY_FN_CAST(TYPE_TINYINT, TYPE_BOOLEAN, ImplicitToBoolean);
 UNARY_FN_CAST(TYPE_SMALLINT, TYPE_BOOLEAN, ImplicitToBoolean);
@@ -250,6 +299,7 @@ UNARY_FN_CAST(TYPE_DATE, TYPE_BOOLEAN, DateToBoolean);
 UNARY_FN_CAST(TYPE_DATETIME, TYPE_BOOLEAN, TimestampToBoolean);
 UNARY_FN_CAST(TYPE_TIME, TYPE_BOOLEAN, ImplicitToBoolean);
 CUSTOMIZE_FN_CAST(TYPE_JSON, TYPE_BOOLEAN, cast_from_json_fn);
+CUSTOMIZE_FN_CAST(TYPE_VARIANT, TYPE_BOOLEAN, cast_from_variant_fn);
 
 template <LogicalType FromType, LogicalType ToType, bool AllowThrowException>
 static ColumnPtr cast_from_string_to_bool_fn(ColumnPtr& column) {
@@ -504,6 +554,7 @@ UNARY_FN_CAST(TYPE_DATETIME, TYPE_TINYINT, TimestampToNumber);
 UNARY_FN_CAST(TYPE_TIME, TYPE_TINYINT, TimeToNumber);
 CUSTOMIZE_FN_CAST(TYPE_VARCHAR, TYPE_TINYINT, cast_int_from_string_fn);
 CUSTOMIZE_FN_CAST(TYPE_JSON, TYPE_TINYINT, cast_from_json_fn);
+CUSTOMIZE_FN_CAST(TYPE_VARIANT, TYPE_TINYINT, cast_from_variant_fn);
 
 // smallint
 SELF_CAST(TYPE_SMALLINT);
@@ -520,6 +571,7 @@ UNARY_FN_CAST(TYPE_DATETIME, TYPE_SMALLINT, TimestampToNumber);
 UNARY_FN_CAST(TYPE_TIME, TYPE_SMALLINT, TimeToNumber);
 CUSTOMIZE_FN_CAST(TYPE_VARCHAR, TYPE_SMALLINT, cast_int_from_string_fn);
 CUSTOMIZE_FN_CAST(TYPE_JSON, TYPE_SMALLINT, cast_from_json_fn);
+CUSTOMIZE_FN_CAST(TYPE_VARIANT, TYPE_SMALLINT, cast_from_variant_fn);
 
 // int
 SELF_CAST(TYPE_INT);
@@ -543,6 +595,7 @@ UNARY_FN_CAST(TYPE_DATETIME, TYPE_INT, TimestampToNumber);
 UNARY_FN_CAST(TYPE_TIME, TYPE_INT, TimeToNumber);
 CUSTOMIZE_FN_CAST(TYPE_VARCHAR, TYPE_INT, cast_int_from_string_fn);
 CUSTOMIZE_FN_CAST(TYPE_JSON, TYPE_INT, cast_from_json_fn);
+CUSTOMIZE_FN_CAST(TYPE_VARIANT, TYPE_INT, cast_from_variant_fn);
 
 // bigint
 SELF_CAST(TYPE_BIGINT);
@@ -566,6 +619,7 @@ UNARY_FN_CAST(TYPE_DATETIME, TYPE_BIGINT, TimestampToNumber);
 UNARY_FN_CAST(TYPE_TIME, TYPE_BIGINT, TimeToNumber);
 CUSTOMIZE_FN_CAST(TYPE_VARCHAR, TYPE_BIGINT, cast_int_from_string_fn);
 CUSTOMIZE_FN_CAST(TYPE_JSON, TYPE_BIGINT, cast_from_json_fn);
+CUSTOMIZE_FN_CAST(TYPE_VARIANT, TYPE_BIGINT, cast_from_variant_fn);
 
 // largeint
 SELF_CAST(TYPE_LARGEINT);
@@ -589,6 +643,7 @@ UNARY_FN_CAST(TYPE_DATETIME, TYPE_LARGEINT, TimestampToNumber);
 UNARY_FN_CAST(TYPE_TIME, TYPE_LARGEINT, TimeToNumber);
 CUSTOMIZE_FN_CAST(TYPE_VARCHAR, TYPE_LARGEINT, cast_int_from_string_fn);
 CUSTOMIZE_FN_CAST(TYPE_JSON, TYPE_LARGEINT, cast_from_json_fn);
+CUSTOMIZE_FN_CAST(TYPE_VARIANT, TYPE_LARGEINT, cast_from_variant_fn);
 
 // float
 SELF_CAST(TYPE_FLOAT);
@@ -612,6 +667,7 @@ UNARY_FN_CAST(TYPE_DATETIME, TYPE_FLOAT, TimestampToNumber);
 UNARY_FN_CAST(TYPE_TIME, TYPE_FLOAT, TimeToNumber);
 CUSTOMIZE_FN_CAST(TYPE_VARCHAR, TYPE_FLOAT, cast_float_from_string_fn);
 CUSTOMIZE_FN_CAST(TYPE_JSON, TYPE_FLOAT, cast_from_json_fn);
+CUSTOMIZE_FN_CAST(TYPE_VARIANT, TYPE_FLOAT, cast_from_variant_fn);
 
 // double
 SELF_CAST(TYPE_DOUBLE);
@@ -635,6 +691,7 @@ UNARY_FN_CAST(TYPE_DATETIME, TYPE_DOUBLE, TimestampToNumber);
 UNARY_FN_CAST(TYPE_TIME, TYPE_DOUBLE, TimeToNumber);
 CUSTOMIZE_FN_CAST(TYPE_VARCHAR, TYPE_DOUBLE, cast_float_from_string_fn);
 CUSTOMIZE_FN_CAST(TYPE_JSON, TYPE_DOUBLE, cast_from_json_fn);
+CUSTOMIZE_FN_CAST(TYPE_VARIANT, TYPE_DOUBLE, cast_from_variant_fn);
 
 // decimal
 DEFINE_UNARY_FN_WITH_IMPL(NumberToDecimal, value) {
@@ -1149,8 +1206,8 @@ public:
             return Status::NotSupported("JIT casting does not support decimal");
         } else {
             ASSIGN_OR_RETURN(datum.value, IRHelper::cast_to_type(b, l, FromType, ToType));
-            if constexpr ((lt_is_integer<FromType> || lt_is_float<FromType>)&&(lt_is_integer<ToType> ||
-                                                                               lt_is_float<ToType>)) {
+            if constexpr ((lt_is_integer<FromType> || lt_is_float<FromType>) &&
+                          (lt_is_integer<ToType> || lt_is_float<ToType>)) {
                 typedef RunTimeCppType<FromType> FromCppType;
                 typedef RunTimeCppType<ToType> ToCppType;
 
@@ -1325,6 +1382,10 @@ CUSTOMIZE_FN_CAST(TYPE_VARCHAR, TYPE_JSON, cast_to_json_fn);
 CUSTOMIZE_FN_CAST(TYPE_TIME, TYPE_JSON, cast_to_json_fn);
 CUSTOMIZE_FN_CAST(TYPE_DATETIME, TYPE_JSON, cast_to_json_fn);
 CUSTOMIZE_FN_CAST(TYPE_DATE, TYPE_JSON, cast_to_json_fn);
+CUSTOMIZE_FN_CAST(TYPE_VARIANT, TYPE_JSON, cast_to_json_fn);
+
+// Cast SQL type to VARIANT
+SELF_CAST(TYPE_VARIANT);
 
 /**
  * Resolve cast to string
@@ -1374,6 +1435,10 @@ public:
 
         if constexpr (Type == TYPE_JSON) {
             return cast_from_json_fn<TYPE_JSON, TYPE_VARCHAR, AllowThrowException>(column);
+        }
+
+        if constexpr (Type == TYPE_VARIANT) {
+            return cast_from_variant_fn<TYPE_VARIANT, TYPE_VARCHAR, AllowThrowException>(column);
         }
 
         return _evaluate_string(context, std::move(column));
@@ -1686,6 +1751,7 @@ Expr* VectorizedCastExprFactory::create_primitive_cast(ObjectPool* pool, const T
             CASE_TO_STRING_FROM(TYPE_DECIMAL128, allow_throw_exception);
             CASE_TO_STRING_FROM(TYPE_JSON, allow_throw_exception);
             CASE_TO_STRING_FROM(TYPE_VARBINARY, allow_throw_exception);
+            CASE_TO_STRING_FROM(TYPE_VARIANT, allow_throw_exception);
         default:
             LOG(WARNING) << "Not support cast " << type_to_string(from_type) << " to " << type_to_string(to_type);
             return nullptr;

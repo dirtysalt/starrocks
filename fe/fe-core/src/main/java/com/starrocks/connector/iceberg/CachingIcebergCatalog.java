@@ -98,12 +98,12 @@ public class CachingIcebergCatalog implements IcebergCatalog {
                 icebergProperties.getIcebergTableCacheRefreshIntervalSec(),
                 enableCache ? DEFAULT_CACHE_NUM : NEVER_CACHE)
                 .removalListener((RemovalNotification<IcebergTableName, Table> n) -> {
-                    LOG.debug("iceberg table cache removal: {}.{}, cause={}, evicted={}",
+                    LOG.info("iceberg table cache removal: {}.{}, cause={}, evicted={}",
                             n.getKey().dbName, n.getKey().tableName,
                             n.getCause(), n.wasEvicted());
                 })
                 .build(asyncReloading(CacheLoader.from(key -> {
-                    LOG.debug("Loading iceberg table {}.{} from remote catalog",
+                    LOG.info("Loading iceberg table {}.{} from remote catalog",
                                     key.dbName, key.tableName);
                     return delegate.getTable(key.dbName, key.tableName);
                 }), executorService));  

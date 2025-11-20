@@ -88,9 +88,6 @@ Status cast_variant_to_arithmetic(const Variant& variant, ColumnBuilder<ResultTy
     }
 }
 
-template <LogicalType DecimalType, bool AllowThrowException>
-Status cast_variant_to_decimal(const Variant& variant, ColumnBuilder<DecimalType>& result);
-
 Status cast_variant_to_datetime(const Variant& variant, const cctz::time_zone& zone,
                                 ColumnBuilder<TYPE_DATETIME>& result);
 
@@ -132,8 +129,6 @@ static Status cast_variant_value_to(const Variant& variant, const cctz::time_zon
         status = cast_variant_to_arithmetic<ResultType>(variant, result);
     } else if constexpr (lt_is_string<ResultType>) {
         status = cast_variant_to_string(variant, zone, result);
-    } else if constexpr (lt_is_decimal<ResultType>) {
-        status = cast_variant_to_decimal(variant, result);
     } else if constexpr (lt_is_date_or_datetime<ResultType>) {
         if constexpr (ResultType == TYPE_DATETIME) {
             status = cast_variant_to_datetime(variant, zone, result);

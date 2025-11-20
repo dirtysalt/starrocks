@@ -1150,6 +1150,16 @@ public:
                 result_column = CastFn<FromType, ToType, AllowThrowException>::cast_fn(std::move(column));
             }
         } else if constexpr (FromType == TYPE_VARIANT || ToType == TYPE_VARIANT) {
+            if constexpr (lt_is_decimal<ToType>) {
+                if (context->error_if_overflow()) {
+                    return VectorizedUnaryFunction<DecimalFrom<OverflowMode::REPORT_ERROR>>::evaluate<FromType, ToType>(
+                            column, to_type.precision, to_type.scale);
+                } else {
+                    return VectorizedUnaryFunction<DecimalFrom<OverflowMode::OUTPUT_NULL>>::evaluate<FromType, ToType>(
+                            column, to_type.precision, to_type.scale);
+                }
+            }
+
             result_column = CastFn<FromType, ToType, AllowThrowException>::cast_fn(std::move(column));
         } else if constexpr (lt_is_decimal<FromType> && lt_is_decimal<ToType>) {
             if (context != nullptr && context->error_if_overflow()) {
@@ -1205,6 +1215,8 @@ public:
         auto& b = jit_ctx->builder;
         if constexpr (FromType == TYPE_JSON || ToType == TYPE_JSON) {
             return Status::NotSupported("JIT casting does not support JSON");
+        } else if constexpr (FromType == TYPE_VARIANT || ToType == TYPE_VARIANT) {
+            return Status::NotSupported("JIT casting does not support VARIANT");
         } else if constexpr (lt_is_decimal<FromType> || lt_is_decimal<ToType>) {
             return Status::NotSupported("JIT casting does not support decimal");
         } else {

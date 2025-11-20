@@ -27,15 +27,12 @@ namespace starrocks {
     Status::NotSupported(fmt::format("Cannot cast variant({}) to type: ", VariantUtil::type_to_string(variant_type), \
                                      logical_type_to_string(logical_type)))
 
-StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& variant,
-                                                            ColumnBuilder<TYPE_BOOLEAN>& result);
+Status cast_variant_to_bool(const Variant& variant, ColumnBuilder<TYPE_BOOLEAN>& result);
 
-StatusOr<RunTimeCppType<TYPE_VARCHAR>> cast_variant_to_string(const Variant& variant, const cctz::time_zone& zone,
-                                                              ColumnBuilder<TYPE_VARCHAR>& result);
+Status cast_variant_to_string(const Variant& variant, const cctz::time_zone& zone, ColumnBuilder<TYPE_VARCHAR>& result);
 
 template <LogicalType ResultType>
-StatusOr<RunTimeColumnType<ResultType>> cast_variant_to_arithmetic(const Variant& variant,
-                                                                   ColumnBuilder<ResultType>& result) {
+Status cast_variant_to_arithmetic(const Variant& variant, ColumnBuilder<ResultType>& result) {
     switch (const VariantType type = variant.type()) {
     case VariantType::NULL_TYPE: {
         result.append_null();
@@ -92,13 +89,12 @@ StatusOr<RunTimeColumnType<ResultType>> cast_variant_to_arithmetic(const Variant
 }
 
 template <LogicalType DecimalType, bool AllowThrowException>
-StatusOr<RunTimeColumnType<DecimalType>> cast_variant_to_decimal(const Variant& variant,
-                                                                 ColumnBuilder<DecimalType>& result);
+Status cast_variant_to_decimal(const Variant& variant, ColumnBuilder<DecimalType>& result);
 
-StatusOr<RunTimeColumnType<TYPE_DATETIME>> cast_variant_to_datetime(const Variant& variant, const cctz::time_zone& zone,
-                                                                    ColumnBuilder<TYPE_DATETIME>& result);
+Status cast_variant_to_datetime(const Variant& variant, const cctz::time_zone& zone,
+                                ColumnBuilder<TYPE_DATETIME>& result);
 
-StatusOr<RunTimeColumnType<TYPE_DATE>> cast_variant_to_date(const Variant& variant, ColumnBuilder<TYPE_DATE>& result);
+Status cast_variant_to_date(const Variant& variant, ColumnBuilder<TYPE_DATE>& result);
 
 template <LogicalType ResultType, bool AllowThrowException>
 static Status cast_variant_value_to(const Variant& variant, const cctz::time_zone& zone,
@@ -125,7 +121,7 @@ static Status cast_variant_value_to(const Variant& variant, const cctz::time_zon
     }
 
     if constexpr (ResultType == TYPE_VARIANT) {
-        result.append(std::move(VariantValue::of_variant(variant)));
+        result.append(VariantValue::of_variant(variant));
         return Status::OK();
     }
 

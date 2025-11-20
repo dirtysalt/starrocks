@@ -21,6 +21,7 @@
 #include <llvm/IR/Value.h>
 #endif
 
+#include <cctz/time_zone.h>
 #include <ryu/ryu.h>
 
 #include <limits>
@@ -1575,6 +1576,15 @@ private:
         }                                                                     \
     }
 
+#define CASE_FROM_VARIANT_TO(TO_TYPE, ALLOWTHROWEXCEPTION)                     \
+    case TO_TYPE: {                                                            \
+        if (ALLOWTHROWEXCEPTION) {                                             \
+            return new VectorizedCastExpr<TYPE_VARIANT, TO_TYPE, true>(node);  \
+        } else {                                                               \
+            return new VectorizedCastExpr<TYPE_VARIANT, TO_TYPE, false>(node); \
+        }                                                                      \
+    }
+
 #define CASE_TO_STRING_FROM(FROM_TYPE, ALLOWTHROWEXCEPTION)                \
     case FROM_TYPE: {                                                      \
         if (ALLOWTHROWEXCEPTION) {                                         \
@@ -1806,7 +1816,7 @@ Expr* VectorizedCastExprFactory::create_variant_to_complex_type_cast(ObjectPool*
             TypeDescriptor json_type = TypeDescriptor::create_json_type();
             auto result = create_cast_expr(pool, json_type, value_desc, allow_throw_exception);
             if (!result.ok()) {
-                LOG(ERROR) << "Fail to create cast expr from json to map, map value type: " << value_desc
+                LOG(ERROR) << "Fail to create cast expr from variant to map, map value type: " << value_desc
                            << ", status: " << result.status();
                 return nullptr;
             }
@@ -1818,6 +1828,27 @@ Expr* VectorizedCastExprFactory::create_variant_to_complex_type_cast(ObjectPool*
         }
 
         return new CastVariantToMap(node, key_cast_expr, value_cast_expr);
+    }
+    case TYPE_STRUCT: {
+        TypeDescriptor expected_type = TypeDescriptor::from_thrift(node.type);
+
+        std::vector<Expr*> field_casts(expected_type.children.size());
+        for (int i = 0; i < expected_type.children.size(); ++i) {
+            TypeDescriptor variant_type = TypeDescriptor::create_variant_type();
+            auto ret = create_cast_expr(pool, variant_type, expected_type.children[i], allow_throw_exception);
+            if (!ret.ok()) {
+                LOG(WARNING) << "Fail to create cast expr from variant to struct, field type: "
+                             << expected_type.children[i] << ", status: " << ret.status();
+                return nullptr;
+            }
+            pool->add(ret.value());
+            field_casts[i] = ret.value();
+            auto cast_input = create_slot_ref(variant_type);
+            field_casts[i]->add_child(cast_input.get());
+            pool->add(cast_input.release());
+        }
+
+        return new CastVariantToStruct(node, std::move(field_casts));
     }
     default:
         LOG(WARNING) << "Not support cast from type: " << type_to_string(from_type)
@@ -1938,6 +1969,37 @@ Expr* VectorizedCastExprFactory::create_primitive_cast(ObjectPool* pool, const T
                 CASE_TO_JSON(TYPE_DATE, allow_throw_exception);
                 CASE_TO_JSON(TYPE_TIME, allow_throw_exception);
                 CASE_TO_JSON(TYPE_DATETIME, allow_throw_exception);
+            default:
+                LOG(WARNING) << "Not support cast " << type_to_string(from_type) << " to " << type_to_string(to_type);
+                return nullptr;
+            }
+        }
+    } else if (from_type == TYPE_VARIANT || to_type == TYPE_VARIANT) {
+        if (from_type == TYPE_VARIANT) {
+            switch (to_type) {
+                CASE_FROM_VARIANT_TO(TYPE_BOOLEAN, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_TINYINT, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_SMALLINT, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_INT, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_BIGINT, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_LARGEINT, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_FLOAT, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_DOUBLE, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_DECIMAL32, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_DECIMAL64, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_DECIMAL128, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_DATE, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_TIME, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_DATETIME, allow_throw_exception);
+                CASE_FROM_VARIANT_TO(TYPE_VARIANT, allow_throw_exception);
+            default:
+                LOG(WARNING) << "Not support cast " << type_to_string(from_type) << " to " << type_to_string(to_type);
+                return nullptr;
+            }
+        }
+        // TODO: Support cast from other types to VARIANT after implementing string -> variant encoding
+        if (to_type == TYPE_VARIANT) {
+            switch (from_type) {
             default:
                 LOG(WARNING) << "Not support cast " << type_to_string(from_type) << " to " << type_to_string(to_type);
                 return nullptr;

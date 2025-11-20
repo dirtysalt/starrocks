@@ -27,6 +27,7 @@
 #include "jsonpath.h"
 #include "runtime/types.h"
 #include "types/large_int_value.h"
+#include "variant_path_parser.h"
 
 namespace starrocks {
 
@@ -251,6 +252,45 @@ private:
 
     bool keys_need_cast() const { return _key_cast_expr != nullptr; }
     bool values_need_cast() const { return _value_cast_expr != nullptr; }
+};
+
+// Expression to cast VARIANT type to STRUCT<ANY>
+class CastVariantToStruct final : public Expr {
+public:
+    CastVariantToStruct(const TExprNode& node, std::vector<Expr*> field_casts)
+            : Expr(node), _field_casts(std::move(field_casts)) {
+        _variant_paths.reserve(_type.field_names.size());
+        for (int i = 0; i < _type.field_names.size(); i++) {
+            std::string path_string = "$." + _type.field_names[i];
+            auto res = VariantPathParser::parse(Slice(path_string));
+            if (!res.ok()) {
+                throw std::runtime_error("Failed to parse variant path: " + path_string);
+            }
+            _variant_paths.emplace_back(res.value());
+        }
+    }
+
+    ~CastVariantToStruct() override = default;
+
+    StatusOr<ColumnPtr> evaluate_checked(ExprContext* context, Chunk* input_chunk) override;
+
+    Expr* clone(ObjectPool* pool) const override {
+        auto cloned = std::unique_ptr<CastVariantToStruct>(new CastVariantToStruct(*this));
+        cloned->_field_casts.reserve(_field_casts.size());
+        for (int i = 0; i < _field_casts.size(); ++i) {
+            if (_field_casts[i] != nullptr) {
+                cloned->_field_casts.emplace_back(Expr::copy(pool, _field_casts[i]));
+            }
+        }
+        return pool->add(cloned.release());
+    }
+
+private:
+    // Invoked only by clone.
+    CastVariantToStruct(const CastVariantToStruct& rhs) : Expr(rhs), _variant_paths(rhs._variant_paths) {}
+
+    std::vector<Expr*> _field_casts;
+    std::vector<VariantPath> _variant_paths;
 };
 
 // cast one MAP to another MAP.

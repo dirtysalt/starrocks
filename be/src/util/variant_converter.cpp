@@ -18,8 +18,7 @@
 
 namespace starrocks {
 
-StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& variant,
-                                                            ColumnBuilder<TYPE_BOOLEAN>& result) {
+Status cast_variant_to_bool(const Variant& variant, ColumnBuilder<TYPE_BOOLEAN>& result) {
     VariantType type = variant.type();
     if (type == VariantType::NULL_TYPE) {
         result.append_null();
@@ -29,7 +28,7 @@ StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& varia
     if (type == VariantType::BOOLEAN) {
         auto value = variant.get_bool();
         if (!value.ok()) {
-            return value;
+            return value.status();
         }
 
         result.append(value.value());
@@ -61,8 +60,8 @@ StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& varia
     return VARIANT_CAST_NOT_SUPPORT(type, TYPE_BOOLEAN);
 }
 
-StatusOr<RunTimeCppType<TYPE_VARCHAR>> cast_variant_to_string(const Variant& variant, const cctz::time_zone& zone,
-                                                              ColumnBuilder<TYPE_VARCHAR>& result) {
+Status cast_variant_to_string(const Variant& variant, const cctz::time_zone& zone,
+                              ColumnBuilder<TYPE_VARCHAR>& result) {
     switch (variant.type()) {
     case VariantType::NULL_TYPE: {
         result.append_null();
@@ -111,8 +110,7 @@ inline bool convert_variant_decimal(SrcType src_value, int src_scale, DstType* d
 }
 
 template <LogicalType DecimalType, bool AllowThrowException>
-StatusOr<RunTimeColumnType<DecimalType>> cast_variant_to_decimal(const Variant& variant,
-                                                                 ColumnBuilder<DecimalType>& result) {
+Status cast_variant_to_decimal(const Variant& variant, ColumnBuilder<DecimalType>& result) {
     using DstCppType = RunTimeCppType<DecimalType>;
     const VariantType type = variant.type();
 
@@ -225,10 +223,9 @@ StatusOr<RunTimeColumnType<DecimalType>> cast_variant_to_decimal(const Variant& 
     return Status::OK();
 }
 
-StatusOr<RunTimeColumnType<TYPE_DATETIME>> cast_variant_to_datetime(const Variant& variant, const cctz::time_zone& zone,
-                                                                    ColumnBuilder<TYPE_DATETIME>& result) {
-    const VariantType type = variant.type();
-    switch (type) {
+Status cast_variant_to_datetime(const Variant& variant, const cctz::time_zone& zone,
+                                ColumnBuilder<TYPE_DATETIME>& result) {
+    switch (const VariantType type = variant.type()) {
     case VariantType::NULL_TYPE: {
         result.append_null();
         return Status::OK();
@@ -296,7 +293,7 @@ StatusOr<RunTimeColumnType<TYPE_DATETIME>> cast_variant_to_datetime(const Varian
     }
 }
 
-StatusOr<RunTimeColumnType<TYPE_DATE>> cast_variant_to_date(const Variant& variant, ColumnBuilder<TYPE_DATE>& result) {
+Status cast_variant_to_date(const Variant& variant, ColumnBuilder<TYPE_DATE>& result) {
     switch (const VariantType type = variant.type()) {
     case VariantType::NULL_TYPE: {
         result.append_null();

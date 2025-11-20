@@ -47,6 +47,10 @@ private:
                                             const TypeDescriptor& cast_type, bool allow_throw_exception);
     static StatusOr<Expr*> create_cast_expr(ObjectPool* pool, const TExprNode& node, const TypeDescriptor& from_type,
                                             const TypeDescriptor& to_type, bool allow_throw_exception);
+    static Expr* create_json_to_complex_type_cast(ObjectPool* pool, const TExprNode& node, LogicalType from_type,
+                                                  LogicalType to_type, bool allow_throw_exception);
+    static Expr* create_variant_to_complex_type_cast(ObjectPool* pool, const TExprNode& node, LogicalType from_type,
+                                                     LogicalType to_type, bool allow_throw_exception);
     static Expr* create_primitive_cast(ObjectPool* pool, const TExprNode& node, LogicalType from_type,
                                        LogicalType to_type, bool allow_throw_exception);
 };
@@ -198,6 +202,55 @@ private:
     CastArrayExpr(const CastArrayExpr& rhs) : Expr(rhs) {}
 
     Expr* _element_cast = nullptr;
+};
+
+// Expression to cast VARIANT type to ARRAY<ANY>
+class CastVariantToArray final : public Expr {
+public:
+    CastVariantToArray(const TExprNode& node, Expr* cast_element, TypeDescriptor type_desc)
+            : Expr(node), _cast_elements_expr(cast_element), _expected_type_desc(std::move(type_desc)) {}
+    ~CastVariantToArray() override = default;
+
+    StatusOr<ColumnPtr> evaluate_checked(ExprContext* context, Chunk* input_chunk) override;
+
+    Expr* clone(ObjectPool* pool) const override {
+        auto cloned = std::unique_ptr<CastVariantToArray>(new CastVariantToArray(*this));
+        if (_cast_elements_expr != nullptr) {
+            cloned->_cast_elements_expr = Expr::copy(pool, _cast_elements_expr);
+        }
+        return pool->add(cloned.release());
+    }
+
+private:
+    // Invoked only by clone.
+    CastVariantToArray(const CastVariantToArray& rhs) : Expr(rhs), _expected_type_desc(rhs._expected_type_desc) {}
+
+    Expr* _cast_elements_expr = nullptr;
+    TypeDescriptor _expected_type_desc;
+};
+
+// Expression to cast VARIANT type to MAP<VARCHAR, ANY>
+class CastVariantToMap final : public Expr {
+public:
+    CastVariantToMap(const TExprNode& node, Expr* key_cast_expr, Expr* value_cast_expr)
+            : Expr(node), _key_cast_expr(std::move(key_cast_expr)), _value_cast_expr(std::move(value_cast_expr)) {}
+
+    CastVariantToMap(const CastVariantToMap& rhs) : Expr(rhs) {}
+
+    ~CastVariantToMap() override = default;
+
+    StatusOr<ColumnPtr> evaluate_checked(ExprContext* context, Chunk* ptr) override;
+
+    Expr* clone(ObjectPool* pool) const override { return pool->add(new CastVariantToMap(*this)); }
+
+private:
+    // If MAP key is TYPE_VARIANT means no need to cast, the expr is nullptr
+    Expr* _key_cast_expr;
+    // If MAP value is TYPE_VARIANT means no need to cast, the expr is nullptr
+    Expr* _value_cast_expr;
+
+    bool keys_need_cast() const { return _key_cast_expr != nullptr; }
+    bool values_need_cast() const { return _value_cast_expr != nullptr; }
 };
 
 // cast one MAP to another MAP.

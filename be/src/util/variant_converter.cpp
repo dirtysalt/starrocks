@@ -58,7 +58,7 @@ StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& varia
         }
     }
 
-    return VARIANT_CAST_NOT_SUPPORT(TYPE_BOOLEAN);
+    return VARIANT_CAST_NOT_SUPPORT(type, TYPE_BOOLEAN);
 }
 
 StatusOr<RunTimeCppType<TYPE_VARCHAR>> cast_variant_to_string(const Variant& variant, const cctz::time_zone& zone,
@@ -93,50 +93,142 @@ StatusOr<RunTimeCppType<TYPE_VARCHAR>> cast_variant_to_string(const Variant& var
     }
 }
 
-template <LogicalType DecimalType>
+template <typename SrcType, typename DstType>
+inline bool convert_variant_decimal(SrcType src_value, int src_scale, DstType* dst_value, int dst_scale) {
+    constexpr bool check_overflow = true;
+
+    if (dst_scale == src_scale) {
+        return DecimalV3Cast::to_decimal_trivial<SrcType, DstType, check_overflow>(src_value, dst_value);
+    } else if (dst_scale > src_scale) {
+        const auto scale_factor = get_scale_factor<DstType>(dst_scale - src_scale);
+        return DecimalV3Cast::to_decimal<SrcType, DstType, DstType, true, check_overflow>(src_value, scale_factor,
+                                                                                          dst_value);
+    } else {
+        const auto scale_factor = get_scale_factor<SrcType>(src_scale - dst_scale);
+        return DecimalV3Cast::to_decimal<SrcType, DstType, SrcType, false, check_overflow>(src_value, scale_factor,
+                                                                                           dst_value);
+    }
+}
+
+template <LogicalType DecimalType, bool AllowThrowException>
 StatusOr<RunTimeColumnType<DecimalType>> cast_variant_to_decimal(const Variant& variant,
                                                                  ColumnBuilder<DecimalType>& result) {
-    switch (variant.type()) {
-    case VariantType::NULL_TYPE: {
+    using DstCppType = RunTimeCppType<DecimalType>;
+    const VariantType type = variant.type();
+
+    if (type == VariantType::NULL_TYPE) {
         result.append_null();
         return Status::OK();
     }
-    case VariantType::DECIMAL4: {
-        auto decimal_value = variant.get_decimal4();
-        if (!decimal_value.ok()) {
-            return decimal_value.status();
-        }
 
-        result.append(static_cast<RunTimeCppType<DecimalType>>(decimal_value.value()));
-        return Status::OK();
+    auto* decimal_column = ColumnHelper::cast_to_raw<DecimalType>(result.data_column().get());
+    const int dst_precision = decimal_column->precision();
+    const int dst_scale = decimal_column->scale();
+
+    DstCppType dst_value;
+    bool overflow = false;
+
+    switch (type) {
+    case VariantType::DECIMAL4: {
+        auto src_decimal = variant.get_decimal4();
+        if (!src_decimal.ok()) {
+            return src_decimal.status();
+        }
+        overflow = convert_variant_decimal<int32_t, DstCppType>(src_decimal.value().value, src_decimal.value().scale,
+                                                                &dst_value, dst_scale);
+        break;
     }
     case VariantType::DECIMAL8: {
-        auto decimal_value = variant.get_decimal8();
-        if (!decimal_value.ok()) {
-            return decimal_value.status();
+        auto src_decimal = variant.get_decimal8();
+        if (!src_decimal.ok()) {
+            return src_decimal.status();
         }
-
-        result.append(static_cast<RunTimeCppType<DecimalType>>(decimal_value.value()));
-        return Status::OK();
+        overflow = convert_variant_decimal<int64_t, DstCppType>(src_decimal.value().value, src_decimal.value().scale,
+                                                                &dst_value, dst_scale);
+        break;
     }
     case VariantType::DECIMAL16: {
-        auto decimal_value = variant.get_decimal16();
-        if (!decimal_value.ok()) {
-            return decimal_value.status();
+        auto src_decimal = variant.get_decimal16();
+        if (!src_decimal.ok()) {
+            return src_decimal.status();
+        }
+        overflow = convert_variant_decimal<int128_t, DstCppType>(src_decimal.value().value, src_decimal.value().scale,
+                                                                 &dst_value, dst_scale);
+        break;
+    }
+    case VariantType::INT8: {
+        auto value = variant.get_int8();
+        if (!value.ok()) return value.status();
+        const auto scale_factor = get_scale_factor<DstCppType>(dst_scale);
+        overflow = DecimalV3Cast::from_integer<int8_t, DstCppType, true>(value.value(), scale_factor, &dst_value);
+        break;
+    }
+    case VariantType::INT16: {
+        auto value = variant.get_int16();
+        if (!value.ok()) return value.status();
+        const auto scale_factor = get_scale_factor<DstCppType>(dst_scale);
+        overflow = DecimalV3Cast::from_integer<int16_t, DstCppType, true>(value.value(), scale_factor, &dst_value);
+        break;
+    }
+    case VariantType::INT32: {
+        auto value = variant.get_int32();
+        if (!value.ok()) return value.status();
+        const auto scale_factor = get_scale_factor<DstCppType>(dst_scale);
+        overflow = DecimalV3Cast::from_integer<int32_t, DstCppType, true>(value.value(), scale_factor, &dst_value);
+        break;
+    }
+    case VariantType::INT64: {
+        auto value = variant.get_int64();
+        if (!value.ok()) return value.status();
+        const auto scale_factor = get_scale_factor<DstCppType>(dst_scale);
+        overflow = DecimalV3Cast::from_integer<int64_t, DstCppType, true>(value.value(), scale_factor, &dst_value);
+        break;
+    }
+    case VariantType::FLOAT: {
+        auto value = variant.get_float();
+        if (!value.ok()) return value.status();
+        const auto scale_factor = get_scale_factor<DstCppType>(dst_scale);
+        overflow = DecimalV3Cast::from_float<float, DstCppType>(value.value(), scale_factor, &dst_value);
+        break;
+    }
+    case VariantType::DOUBLE: {
+        auto value = variant.get_double();
+        if (!value.ok()) return value.status();
+        const auto scale_factor = get_scale_factor<DstCppType>(dst_scale);
+        overflow = DecimalV3Cast::from_float<double, DstCppType>(value.value(), scale_factor, &dst_value);
+        break;
+    }
+    case VariantType::STRING: {
+        auto str = variant.get_string();
+        if (!str.ok()) return str.status();
+        overflow = DecimalV3Cast::from_string<DstCppType>(&dst_value, dst_precision, dst_scale, str.value().data(),
+                                                          str.value().size());
+        break;
+    }
+
+    default:
+        return VARIANT_CAST_NOT_SUPPORT(type, DecimalType);
+    }
+
+    if (UNLIKELY(overflow)) {
+        if constexpr (AllowThrowException) {
+            return Status::InternalError(fmt::format("The type cast from {} to {} overflows",
+                                                     VariantUtil::type_to_string(type),
+                                                     logical_type_to_string(DecimalType)));
         }
 
-        result.append(static_cast<RunTimeCppType<DecimalType>>(decimal_value.value()));
+        result.append_null();
         return Status::OK();
     }
-    default: {
-        return VARIANT_CAST_NOT_SUPPORT(DecimalType);
-    }
-    }
+
+    result.append(dst_value);
+    return Status::OK();
 }
 
 StatusOr<RunTimeColumnType<TYPE_DATETIME>> cast_variant_to_datetime(const Variant& variant, const cctz::time_zone& zone,
                                                                     ColumnBuilder<TYPE_DATETIME>& result) {
-    switch (variant.type()) {
+    const VariantType type = variant.type();
+    switch (type) {
     case VariantType::NULL_TYPE: {
         result.append_null();
         return Status::OK();
@@ -190,15 +282,62 @@ StatusOr<RunTimeColumnType<TYPE_DATETIME>> cast_variant_to_datetime(const Varian
         TimestampValue tv{};
         bool ret = tv.from_string(str.data(), str.size());
         if (!ret) {
-            return Status::VariantError(
-                    fmt::format("Failed to cast string '{}' to DATETIME", std::string(str.data(), str.size())));
+            return Status::VariantError(fmt::format("Failed to cast string '{}' to {}",
+                                                    std::string(str.data(), str.size()),
+                                                    logical_type_to_string(TYPE_DATETIME)));
         }
 
         result.append(std::move(tv));
         return Status::OK();
     }
     default: {
-        return VARIANT_CAST_NOT_SUPPORT(TYPE_DATETIME);
+        return VARIANT_CAST_NOT_SUPPORT(type, TYPE_DATETIME);
+    }
+    }
+}
+
+StatusOr<RunTimeColumnType<TYPE_DATE>> cast_variant_to_date(const Variant& variant, ColumnBuilder<TYPE_DATE>& result) {
+    switch (const VariantType type = variant.type()) {
+    case VariantType::NULL_TYPE: {
+        result.append_null();
+        return Status::OK();
+    }
+    case VariantType::INT8:
+    case VariantType::INT16:
+    case VariantType::INT32:
+    case VariantType::INT64: {
+        auto int_value = VariantUtil::get_long(&variant);
+        if (!int_value.ok()) {
+            return int_value.status();
+        }
+
+        int64_t sec = int_value.value();
+        int days = sec / 86400;
+        DateValue dv;
+        dv.from_days_since_unix_epoch(days);
+        result.append(std::move(dv));
+        return Status::OK();
+    }
+    case VariantType::STRING: {
+        auto str_value = variant.get_string();
+        if (!str_value.ok()) {
+            return str_value.status();
+        }
+
+        const std::string_view str = str_value.value();
+        DateValue dv{};
+        bool ret = dv.from_string(str.data(), str.size());
+        if (!ret) {
+            return Status::VariantError(fmt::format("Failed to cast string '{}' to {}",
+                                                    std::string(str.data(), str.size()),
+                                                    logical_type_to_string(TYPE_DATE)));
+        }
+
+        result.append(std::move(dv));
+        return Status::OK();
+    }
+    default: {
+        return VARIANT_CAST_NOT_SUPPORT(type, TYPE_DATE);
     }
     }
 }

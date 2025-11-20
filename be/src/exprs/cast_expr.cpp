@@ -268,7 +268,7 @@ static ColumnPtr cast_from_variant_fn(ColumnPtr& column) {
         }
 
         Variant variant(variant_value->get_metadata(), variant_value->get_value());
-        Status status = cast_variant_value_to<ToType, AllowThrowException>(variant, cctz::local_time_zone(), builder);
+        auto status = cast_variant_value_to<ToType, AllowThrowException>(variant, cctz::local_time_zone(), builder);
         if (!status.ok()) {
             if constexpr (AllowThrowException) {
                 THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FromType, ToType, variant_value->to_string());
@@ -1148,6 +1148,8 @@ public:
             } else {
                 result_column = CastFn<FromType, ToType, AllowThrowException>::cast_fn(std::move(column));
             }
+        } else if constexpr (FromType == TYPE_VARIANT || ToType == TYPE_VARIANT) {
+            result_column = CastFn<FromType, ToType, AllowThrowException>::cast_fn(std::move(column));
         } else if constexpr (lt_is_decimal<FromType> && lt_is_decimal<ToType>) {
             if (context != nullptr && context->error_if_overflow()) {
                 return VectorizedUnaryFunction<DecimalToDecimal<OverflowMode::REPORT_ERROR>>::evaluate<FromType,
@@ -1622,24 +1624,47 @@ StatusOr<ColumnPtr> MustNullExpr::evaluate_checked(ExprContext* context, Chunk* 
     return only_null;
 }
 
-// Need add result to pool by caller.
-Expr* VectorizedCastExprFactory::create_primitive_cast(ObjectPool* pool, const TExprNode& node, LogicalType from_type,
-                                                       LogicalType to_type, bool allow_throw_exception) {
-    if (to_type == TYPE_CHAR) {
-        to_type = TYPE_VARCHAR;
+// Check whether JSON can be cast to complex types (ARRAY / MAP / STRUCT)
+inline bool json_to_complex_type(LogicalType from_type, LogicalType to_type) {
+    switch (from_type) {
+    case TYPE_JSON:
+        switch (to_type) {
+        case TYPE_ARRAY:
+        case TYPE_MAP:
+        case TYPE_STRUCT:
+            return true;
+        default:
+            return false;
+        }
+    default:
+        return false;
     }
-    if (from_type == TYPE_CHAR) {
-        from_type = TYPE_VARCHAR;
+}
+
+// Check whether VARIANT can be cast to complex types (ARRAY / MAP / STRUCT)
+inline bool variant_to_complex_type(LogicalType from_type, LogicalType to_type) {
+    switch (from_type) {
+    case TYPE_VARIANT:
+        switch (to_type) {
+        case TYPE_ARRAY:
+        case TYPE_MAP:
+        case TYPE_STRUCT:
+            return true;
+        default:
+            return false;
+        }
+    default:
+        return false;
     }
-    if (from_type == TYPE_NULL) {
-        // NULL TO OTHER TYPE, direct return
-        from_type = to_type;
-    }
-    if (from_type == TYPE_VARCHAR && to_type == TYPE_HLL) {
-        return dispatch_throw_exception<CastVarcharToHll>(allow_throw_exception, node);
-    }
-    // Cast string to array<ANY>
-    if ((from_type == TYPE_VARCHAR || from_type == TYPE_JSON) && to_type == TYPE_ARRAY) {
+}
+
+Expr* VectorizedCastExprFactory::create_json_to_complex_type_cast(ObjectPool* pool, const TExprNode& node,
+                                                                  LogicalType from_type, LogicalType to_type,
+                                                                  bool allow_throw_exception) {
+    DCHECK(from_type == TYPE_JSON);
+
+    switch (to_type) {
+    case TYPE_ARRAY: {
         TypeDescriptor cast_to = TypeDescriptor::from_thrift(node.type);
         TExprNode cast;
         cast.type = cast_to.children[0].to_thrift();
@@ -1658,14 +1683,9 @@ Expr* VectorizedCastExprFactory::create_primitive_cast(ObjectPool* pool, const T
         pool->add(child);
         cast_element_expr->add_child(child);
 
-        if (from_type == TYPE_VARCHAR) {
-            return new CastStringToArray(node, cast_element_expr, cast_to, allow_throw_exception);
-        } else {
-            return new CastJsonToArray(node, cast_element_expr, cast_to);
-        }
+        return new CastJsonToArray(node, cast_element_expr, cast_to);
     }
-
-    if (from_type == TYPE_JSON && to_type == TYPE_STRUCT) {
+    case TYPE_STRUCT: {
         TypeDescriptor cast_to = TypeDescriptor::from_thrift(node.type);
 
         std::vector<Expr*> field_casts(cast_to.children.size());
@@ -1684,8 +1704,7 @@ Expr* VectorizedCastExprFactory::create_primitive_cast(ObjectPool* pool, const T
         }
         return new CastJsonToStruct(node, std::move(field_casts));
     }
-
-    if (from_type == TYPE_JSON && to_type == TYPE_MAP) {
+    case TYPE_MAP: {
         TypeDescriptor cast_to = TypeDescriptor::from_thrift(node.type);
 
         // CastJsonToMap will first cast json to MAP<VARCHAR,JSON>, then cast to the target MAP<KEY,VALUE>
@@ -1726,9 +1745,136 @@ Expr* VectorizedCastExprFactory::create_primitive_cast(ObjectPool* pool, const T
 
         return new CastJsonToMap(node, key_cast_expr, value_cast_expr);
     }
+    default:
+        LOG(WARNING) << "Not support cast from type: " << type_to_string(from_type)
+                     << " to type: " << type_to_string(to_type);
+        return nullptr;
+    }
+}
+
+Expr* VectorizedCastExprFactory::create_variant_to_complex_type_cast(ObjectPool* pool, const TExprNode& node,
+                                                                     LogicalType from_type, LogicalType to_type,
+                                                                     bool allow_throw_exception) {
+    DCHECK(from_type == TYPE_VARIANT);
+
+    switch (to_type) {
+    case TYPE_ARRAY: {
+        const TypeDescriptor expected_type = TypeDescriptor::from_thrift(node.type);
+        TExprNode cast;
+        cast.type = expected_type.children[0].to_thrift();
+        cast.child_type = to_thrift(from_type);
+        cast.slot_ref.slot_id = 0;
+        cast.slot_ref.tuple_id = 0;
+
+        Expr* cast_element_expr = from_thrift(pool, cast, allow_throw_exception);
+        if (cast_element_expr == nullptr) {
+            return nullptr;
+        }
+        DCHECK(pool != nullptr);
+        pool->add(cast_element_expr);
+
+        auto* child = new ColumnRef(cast);
+        pool->add(child);
+        cast_element_expr->add_child(child);
+
+        return new CastVariantToArray(node, cast_element_expr, expected_type);
+    }
+    case TYPE_MAP: {
+        TypeDescriptor expected_type = TypeDescriptor::from_thrift(node.type);
+
+        DCHECK(expected_type.children.size() == 2);
+        Expr* key_cast_expr = nullptr;
+        auto& key_desc = expected_type.children[0];
+        if (key_desc.type != TYPE_VARCHAR) {
+            const TypeDescriptor varchar_type = TypeDescriptor::create_varchar_type(TypeDescriptor::MAX_VARCHAR_LENGTH);
+            auto result = create_cast_expr(pool, varchar_type, key_desc, allow_throw_exception);
+            if (!result.ok()) {
+                LOG(ERROR) << "Fail to create cast expr from variant to map, map key type: " << key_desc
+                           << ", status: " << result.status();
+                return nullptr;
+            }
+
+            key_cast_expr = result.value();
+            Expr* cast_input = create_slot_ref(varchar_type).release();
+            key_cast_expr->add_child(cast_input);
+            pool->add(key_cast_expr);
+            pool->add(cast_input);
+        }
+        Expr* value_cast_expr = nullptr;
+        auto& value_desc = expected_type.children[1];
+        if (value_desc.type != TYPE_VARIANT) {
+            TypeDescriptor json_type = TypeDescriptor::create_json_type();
+            auto result = create_cast_expr(pool, json_type, value_desc, allow_throw_exception);
+            if (!result.ok()) {
+                LOG(ERROR) << "Fail to create cast expr from json to map, map value type: " << value_desc
+                           << ", status: " << result.status();
+                return nullptr;
+            }
+            value_cast_expr = result.value();
+            Expr* cast_input = create_slot_ref(json_type).release();
+            value_cast_expr->add_child(cast_input);
+            pool->add(value_cast_expr);
+            pool->add(cast_input);
+        }
+
+        return new CastVariantToMap(node, key_cast_expr, value_cast_expr);
+    }
+    default:
+        LOG(WARNING) << "Not support cast from type: " << type_to_string(from_type)
+                     << " to type: " << type_to_string(to_type);
+        return nullptr;
+    }
+}
+
+// Need add result to pool by caller.
+Expr* VectorizedCastExprFactory::create_primitive_cast(ObjectPool* pool, const TExprNode& node, LogicalType from_type,
+                                                       LogicalType to_type, bool allow_throw_exception) {
+    if (to_type == TYPE_CHAR) {
+        to_type = TYPE_VARCHAR;
+    }
+    if (from_type == TYPE_CHAR) {
+        from_type = TYPE_VARCHAR;
+    }
+    if (from_type == TYPE_NULL) {
+        // NULL TO OTHER TYPE, direct return
+        from_type = to_type;
+    }
+    if (from_type == TYPE_VARCHAR && to_type == TYPE_HLL) {
+        return dispatch_throw_exception<CastVarcharToHll>(allow_throw_exception, node);
+    }
+    // Cast string to array<ANY>
+    if (from_type == TYPE_VARCHAR && to_type == TYPE_ARRAY) {
+        TypeDescriptor cast_to = TypeDescriptor::from_thrift(node.type);
+        TExprNode cast;
+        cast.type = cast_to.children[0].to_thrift();
+        cast.child_type = to_thrift(from_type);
+        cast.slot_ref.slot_id = 0;
+        cast.slot_ref.tuple_id = 0;
+
+        Expr* cast_element_expr = VectorizedCastExprFactory::from_thrift(pool, cast, allow_throw_exception);
+        if (cast_element_expr == nullptr) {
+            return nullptr;
+        }
+        DCHECK(pool != nullptr);
+        pool->add(cast_element_expr);
+
+        auto* child = new ColumnRef(cast);
+        pool->add(child);
+        cast_element_expr->add_child(child);
+
+        return new CastStringToArray(node, cast_element_expr, cast_to, allow_throw_exception);
+    }
 
     if (from_type == TYPE_VARCHAR && to_type == TYPE_OBJECT) {
         return dispatch_throw_exception<CastVarcharToBitmap>(allow_throw_exception, node);
+    }
+
+    if (json_to_complex_type(from_type, to_type)) {
+        return create_json_to_complex_type_cast(pool, node, from_type, to_type, allow_throw_exception);
+    }
+
+    if (variant_to_complex_type(from_type, to_type)) {
+        return create_variant_to_complex_type_cast(pool, node, from_type, to_type, allow_throw_exception);
     }
 
     if (to_type == TYPE_VARCHAR) {

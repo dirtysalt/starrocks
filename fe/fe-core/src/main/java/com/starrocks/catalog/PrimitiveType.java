@@ -222,6 +222,11 @@ public enum PrimitiveType {
         // VARIANT
         builder.putAll(VARIANT, VARIANT);
         builder.putAll(VARIANT, NULL_TYPE);
+        for (PrimitiveType type : VARIANT_COMPATIBLE_TYPE) {
+            // TODO(xuba): support implicit cast from other types to VARIANT
+            // builder.put(type, VARIANT);
+            builder.put(VARIANT, type);
+        }
 
         IMPLICIT_CAST_MAP = builder.build();
     }

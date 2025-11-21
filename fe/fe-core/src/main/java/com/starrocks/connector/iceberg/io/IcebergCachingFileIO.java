@@ -561,6 +561,7 @@ public class IcebergCachingFileIO implements FileIO, HadoopConfigurable {
 
         @Override
         public long getLength() {
+            LOG.info("Try to get location by IcebergCachingFileIO: " + location());
             long len = contentCache.getLength(location());
             return len == -1 ? wrappedInputFile.getLength() : len;
         }

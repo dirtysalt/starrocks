@@ -259,7 +259,6 @@ public interface IcebergCatalog extends MemoryTrackable {
             tableScan = tableScan.planWith(executorService);
         }
         Logger logger = getLogger();
-
         // TODO: ideally we should know if table is partitioned under a snapshotId.
         // but currently we just did it in a very wild way.
         if (nativeTable.spec().isUnpartitioned()) {
@@ -300,6 +299,7 @@ public interface IcebergCatalog extends MemoryTrackable {
                 throw new StarRocksConnectorException("Failed to get partitions for table: " + nativeTable.name(), e);
             }
         } else {
+            logger.info("Checking partitions behind for the table [{}] with snapshot [{}]", nativeTable.name(), snapshotId);
             // For partition table, we need to get all partitions from PartitionsTable.
             try (CloseableIterable<FileScanTask> tasks = tableScan.planFiles()) {
                 for (FileScanTask task : tasks) {

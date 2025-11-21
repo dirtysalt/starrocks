@@ -2000,9 +2000,6 @@ Expr* VectorizedCastExprFactory::create_primitive_cast(ObjectPool* pool, const T
                 CASE_FROM_VARIANT_TO(TYPE_DECIMAL32, allow_throw_exception);
                 CASE_FROM_VARIANT_TO(TYPE_DECIMAL64, allow_throw_exception);
                 CASE_FROM_VARIANT_TO(TYPE_DECIMAL128, allow_throw_exception);
-                CASE_FROM_VARIANT_TO(TYPE_DATE, allow_throw_exception);
-                CASE_FROM_VARIANT_TO(TYPE_TIME, allow_throw_exception);
-                CASE_FROM_VARIANT_TO(TYPE_DATETIME, allow_throw_exception);
                 CASE_FROM_VARIANT_TO(TYPE_VARIANT, allow_throw_exception);
             default:
                 LOG(WARNING) << "Not support cast " << type_to_string(from_type) << " to " << type_to_string(to_type);

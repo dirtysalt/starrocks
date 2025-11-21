@@ -88,22 +88,16 @@ Status cast_variant_to_arithmetic(const Variant& variant, ColumnBuilder<ResultTy
     }
 }
 
-Status cast_variant_to_datetime(const Variant& variant, const cctz::time_zone& zone,
-                                ColumnBuilder<TYPE_DATETIME>& result);
-
-Status cast_variant_to_date(const Variant& variant, ColumnBuilder<TYPE_DATE>& result);
-
 template <LogicalType ResultType, bool AllowThrowException>
 static Status cast_variant_value_to(const Variant& variant, const cctz::time_zone& zone,
                                     ColumnBuilder<ResultType>& result) {
     const VariantType variant_type = variant.type();
-    // Supported types: arithmetic, string, decimal, date/datetime, variant
+    // Supported types: arithmetic, string, decimal, variant
     // Some casting require more information like target type within ARRAY/MAP/STRUCT which is not available here:
     // VARIANT -> ARRAY<ANY>: CastVariantToArray
     // VARIANT -> MAP<VARCHAR, ANY>: CastVariantToMap
     // VARIANT -> STRUCT<...>: CastVariantToStruct
-    if constexpr (!lt_is_arithmetic<ResultType> && !lt_is_string<ResultType> && !lt_is_decimal<ResultType> &&
-                  !lt_is_date_or_datetime<ResultType> && ResultType != TYPE_VARIANT) {
+    if constexpr (!lt_is_arithmetic<ResultType> && !lt_is_string<ResultType> && !lt_is_decimal<ResultType> && ResultType != TYPE_VARIANT) {
         if constexpr (AllowThrowException) {
             return VARIANT_CAST_NOT_SUPPORT(variant_type, ResultType);
         }
@@ -129,12 +123,6 @@ static Status cast_variant_value_to(const Variant& variant, const cctz::time_zon
         status = cast_variant_to_arithmetic<ResultType>(variant, result);
     } else if constexpr (lt_is_string<ResultType>) {
         status = cast_variant_to_string(variant, zone, result);
-    } else if constexpr (lt_is_date_or_datetime<ResultType>) {
-        if constexpr (ResultType == TYPE_DATETIME) {
-            status = cast_variant_to_datetime(variant, zone, result);
-        } else if constexpr (ResultType == TYPE_DATE) {
-            status = cast_variant_to_date(variant, result);
-        }
     }
 
     if (!status.ok()) {

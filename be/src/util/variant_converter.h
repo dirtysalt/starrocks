@@ -31,6 +31,16 @@ Status cast_variant_to_bool(const Variant& variant, ColumnBuilder<TYPE_BOOLEAN>&
 
 Status cast_variant_to_string(const Variant& variant, const cctz::time_zone& zone, ColumnBuilder<TYPE_VARCHAR>& result);
 
+#define VARIANT_CAST_CASE(VARIANT_TYPE_ENUM, GETTER_METHOD)                    \
+    case VariantType::VARIANT_TYPE_ENUM: {                                     \
+        auto value = variant.GETTER_METHOD();                                  \
+        if (!value.ok()) {                                                     \
+            return value.status();                                             \
+        }                                                                      \
+        result.append(static_cast<RunTimeCppType<ResultType>>(value.value())); \
+        return Status::OK();                                                   \
+    }
+
 template <LogicalType ResultType>
 Status cast_variant_to_arithmetic(const Variant& variant, ColumnBuilder<ResultType>& result) {
     switch (const VariantType type = variant.type()) {
@@ -38,51 +48,13 @@ Status cast_variant_to_arithmetic(const Variant& variant, ColumnBuilder<ResultTy
         result.append_null();
         return Status::OK();
     }
-    case VariantType::BOOLEAN: {
-        auto value = variant.get_bool();
-        if (!value.ok()) {
-            return value.status();
-        }
-
-        result.append(static_cast<RunTimeCppType<ResultType>>(value.value()));
-        return Status::OK();
-    }
-    case VariantType::INT8: {
-        auto value = variant.get_int8();
-        if (!value.ok()) {
-            return value.status();
-        }
-
-        result.append(static_cast<RunTimeCppType<ResultType>>(value.value()));
-        return Status::OK();
-    }
-    case VariantType::INT16: {
-        auto value = variant.get_int16();
-        if (!value.ok()) {
-            return value.status();
-        }
-
-        result.append(static_cast<RunTimeCppType<ResultType>>(value.value()));
-        return Status::OK();
-    }
-    case VariantType::INT32: {
-        auto value = variant.get_int32();
-        if (!value.ok()) {
-            return value.status();
-        }
-
-        result.append(static_cast<RunTimeCppType<ResultType>>(value.value()));
-        return Status::OK();
-    }
-    case VariantType::INT64: {
-        auto value = variant.get_int64();
-        if (!value.ok()) {
-            return value.status();
-        }
-
-        result.append(static_cast<RunTimeCppType<ResultType>>(value.value()));
-        return Status::OK();
-    }
+        VARIANT_CAST_CASE(BOOLEAN, get_bool)
+        VARIANT_CAST_CASE(INT8, get_int8)
+        VARIANT_CAST_CASE(INT16, get_int16)
+        VARIANT_CAST_CASE(INT32, get_int32)
+        VARIANT_CAST_CASE(INT64, get_int64)
+        VARIANT_CAST_CASE(FLOAT, get_float)
+        VARIANT_CAST_CASE(DOUBLE, get_double)
     default:
         return VARIANT_CAST_NOT_SUPPORT(type, ResultType);
     }
@@ -97,7 +69,8 @@ static Status cast_variant_value_to(const Variant& variant, const cctz::time_zon
     // VARIANT -> ARRAY<ANY>: CastVariantToArray
     // VARIANT -> MAP<VARCHAR, ANY>: CastVariantToMap
     // VARIANT -> STRUCT<...>: CastVariantToStruct
-    if constexpr (!lt_is_arithmetic<ResultType> && !lt_is_string<ResultType> && !lt_is_decimal<ResultType> && ResultType != TYPE_VARIANT) {
+    if constexpr (!lt_is_arithmetic<ResultType> && !lt_is_string<ResultType> && !lt_is_decimal<ResultType> &&
+                  ResultType != TYPE_VARIANT) {
         if constexpr (AllowThrowException) {
             return VARIANT_CAST_NOT_SUPPORT(variant_type, ResultType);
         }

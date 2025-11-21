@@ -125,6 +125,7 @@ public enum PrimitiveType {
                     .add(BOOLEAN)
                     .addAll(NUMBER_TYPE_LIST)
                     .addAll(STRING_TYPE_LIST)
+                    .add(JSON)
                     .build();
 
     public static final ImmutableList<PrimitiveType> VARIANT_UNCOMPATIBLE_TYPE =

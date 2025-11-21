@@ -73,8 +73,7 @@ Status cast_variant_to_string(const Variant& variant, const cctz::time_zone& zon
             return str.status();
         }
 
-        Slice slice(str.value().data(), str.value().size());
-        result.append(slice);
+        result.append(Slice(std::string(str.value())));
         return Status::OK();
     }
     default: {

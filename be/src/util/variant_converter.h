@@ -103,6 +103,8 @@ static Status cast_variant_value_to(const Variant& variant, const cctz::time_zon
             return Status::InternalError(
                     fmt::format("Fail to cast variant: {}", logical_type_to_string(ResultType), status.to_string()));
         } else {
+            LOG(WARNING) << "Fail to cast variant(type=" << VariantUtil::type_to_string(variant_type) << ") to "
+                         << logical_type_to_string(ResultType) << ": " << status.to_string();
             result.append_null();
         }
     }

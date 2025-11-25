@@ -1973,6 +1973,7 @@ Expr* VectorizedCastExprFactory::create_primitive_cast(ObjectPool* pool, const T
                 CASE_TO_JSON(TYPE_FLOAT, allow_throw_exception);
                 CASE_TO_JSON(TYPE_DOUBLE, allow_throw_exception);
                 CASE_TO_JSON(TYPE_JSON, allow_throw_exception);
+                CASE_TO_JSON(TYPE_VARIANT, allow_throw_exception);
                 CASE_TO_JSON(TYPE_CHAR, allow_throw_exception);
                 CASE_TO_JSON(TYPE_VARCHAR, allow_throw_exception);
                 CASE_TO_JSON(TYPE_DECIMAL32, allow_throw_exception);

@@ -69,8 +69,7 @@ static Status cast_variant_value_to(const Variant& variant, const cctz::time_zon
     // VARIANT -> ARRAY<ANY>: CastVariantToArray
     // VARIANT -> MAP<VARCHAR, ANY>: CastVariantToMap
     // VARIANT -> STRUCT<...>: CastVariantToStruct
-    if constexpr (!lt_is_arithmetic<ResultType> && !lt_is_string<ResultType> && !lt_is_decimal<ResultType> &&
-                  ResultType != TYPE_VARIANT) {
+    if constexpr (!lt_is_arithmetic<ResultType> && !lt_is_string<ResultType> && ResultType != TYPE_VARIANT) {
         if constexpr (AllowThrowException) {
             return VARIANT_CAST_NOT_SUPPORT(variant_type, ResultType);
         }

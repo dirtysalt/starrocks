@@ -26,12 +26,23 @@
 namespace starrocks {
 
 StatusOr<ColumnPtr> VariantFunctions::variant_query(FunctionContext* context, const Columns& columns) {
-    RETURN_IF_COLUMNS_ONLY_NULL(columns);
-    if (columns.size() != 2) {
-        return Status::InvalidArgument("VariantFunctions::variant_query requires 2 arguments");
-    }
-
     return _do_variant_query<TYPE_VARIANT>(context, columns);
+}
+
+StatusOr<ColumnPtr> VariantFunctions::get_variant_string(FunctionContext* context, const Columns& columns) {
+    return _do_variant_query<TYPE_VARCHAR>(context, columns);
+}
+
+StatusOr<ColumnPtr> VariantFunctions::get_variant_int(FunctionContext* context, const Columns& columns) {
+    return _do_variant_query<TYPE_BIGINT>(context, columns);
+}
+
+StatusOr<ColumnPtr> VariantFunctions::get_variant_bool(FunctionContext* context, const Columns& columns) {
+    return _do_variant_query<TYPE_BOOLEAN>(context, columns);
+}
+
+StatusOr<ColumnPtr> VariantFunctions::get_variant_double(FunctionContext* context, const Columns& columns) {
+    return _do_variant_query<TYPE_DOUBLE>(context, columns);
 }
 
 Status VariantFunctions::variant_segments_prepare(FunctionContext* context, FunctionContext::FunctionStateScope scope) {
@@ -86,6 +97,11 @@ Status VariantFunctions::variant_segments_close(FunctionContext* context, Functi
 
 template <LogicalType ResultType>
 StatusOr<ColumnPtr> VariantFunctions::_do_variant_query(FunctionContext* context, const Columns& columns) {
+    RETURN_IF_COLUMNS_ONLY_NULL(columns);
+    if (columns.size() != 2) {
+        return Status::InvalidArgument("Variant query functions requires 2 arguments");
+    }
+
     size_t num_rows = columns[0]->size();
 
     auto variant_viewer = ColumnViewer<TYPE_VARIANT>(columns[0]);

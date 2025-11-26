@@ -25,11 +25,23 @@ namespace starrocks {
 class VariantFunctions {
 public:
     /**
-     * @param: [variant, json_path, result_type]
-     * @paramType: [VariantColumn, BinaryColumn, BinaryColumn]
-     * @return: result column with type `result_type`
+     * @param: [variant, variant_path]
+     * @paramType: [VariantColumn, BinaryColumn]
+     * @return: VariantColumn
      */
     DEFINE_VECTORIZED_FN(variant_query);
+
+    /**
+     *
+     * @param [variant, json_path]
+     * @paramType: [VariantColumn, BinaryColumn]
+     * @return : ResultTypeColumn
+     */
+    DEFINE_VECTORIZED_FN(get_variant_bool);
+    // return bigint to unify all integer types
+    DEFINE_VECTORIZED_FN(get_variant_int);
+    DEFINE_VECTORIZED_FN(get_variant_double);
+    DEFINE_VECTORIZED_FN(get_variant_string);
 
     // Preload the variant segments if necessary.
     // This function is called once per query execution

@@ -139,8 +139,6 @@ StatusOr<ColumnPtr> VariantFunctions::_do_variant_query(FunctionContext* context
             Variant variant(variant_value->get_metadata(), value);
             StatusOr<Variant> variant_field = VariantPath::seek(&variant, variant_segments_status.value());
             if (!variant_field.ok()) {
-                LOG(WARNING) << "Failed to seek variant path: " << path_slice.to_string()
-                             << " in the variant value: " << variant_value->to_string();
                 result.append_null();
                 continue;
             }
@@ -163,8 +161,7 @@ StatusOr<ColumnPtr> VariantFunctions::_do_variant_query(FunctionContext* context
                 }
             }
         } catch (const std::exception& e) {
-            LOG(WARNING) << "Error processing variant query: " << variant_value->to_string() << " with path "
-                         << path_slice.to_string() << ": " << e.what();
+            LOG(WARNING) << "Error processing variant query with path " << path_slice.to_string() << ": " << e.what();
             result.append_null();
         }
     }

@@ -69,6 +69,22 @@ StatusOr<VariantValue> VariantValue::create(const Slice& slice) {
     return VariantValue(std::move(metadata), std::move(value));
 }
 
+StatusOr<VariantValue> VariantValue::create(const Slice& metadata, const Slice& value) {
+    if (metadata.empty()) {
+        return of_null();
+    }
+
+    RETURN_IF_ERROR(validate_metadata(std::string_view(metadata.get_data(), metadata.get_size())));
+    // validate value size limit (16MB)
+    if (metadata.get_size() + value.get_size() > kMaxVariantSize) {
+        return Status::InvalidArgument("Variant value size exceeds maximum limit: " + std::to_string(value.get_size()) +
+                                       " > " + std::to_string(kMaxVariantSize));
+    }
+
+    return VariantValue(std::string(metadata.get_data(), metadata.get_size()),
+                        std::string(value.get_data(), value.get_size()));
+}
+
 // Create a VariantValue from a Parquet Variant.
 VariantValue VariantValue::of_variant(const Variant& variant) {
     const std::string_view metadata = variant.metadata().get_raw();

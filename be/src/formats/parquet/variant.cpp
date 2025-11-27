@@ -579,21 +579,55 @@ StatusOr<Variant> Variant::get_object_by_key(std::string_view key) const {
     RETURN_IF_ERROR(validate_basic_type(BasicType::OBJECT));
 
     auto object_info = *get_object_info(_value);
-    for (uint32_t i = 0; i < object_info.num_elements; ++i) {
-        uint32_t field_id = readLittleEndianUnsigned(
-                _value.data() + object_info.id_start_offset + i * object_info.id_size, object_info.id_size);
-        uint32_t offset = readLittleEndianUnsigned(
-                _value.data() + object_info.offset_start_offset + i * object_info.offset_size, object_info.offset_size);
-        std::string_view field_key = *_metadata.get_key(field_id);
-        if (field_key == key) {
-            uint32_t data_start_offset = object_info.data_start_offset + offset;
-            if (data_start_offset > _value.size()) {
-                return Status::VariantError("Offset is out of bounds: " + std::to_string(offset) +
-                                            ", data_start_offset: " + std::to_string(object_info.data_start_offset) +
-                                            ", value_size: " + std::to_string(_value.size()));
+
+    if (object_info.num_elements < kBinarySearchThreshold) {
+        for (uint32_t i = 0; i < object_info.num_elements; ++i) {
+            uint32_t field_id = readLittleEndianUnsigned(
+                    _value.data() + object_info.id_start_offset + i * object_info.id_size, object_info.id_size);
+            std::string_view field_key = *_metadata.get_key(field_id);
+            if (field_key == key) {
+                uint32_t offset = readLittleEndianUnsigned(
+                        _value.data() + object_info.offset_start_offset + i * object_info.offset_size,
+                        object_info.offset_size);
+                uint32_t data_start_offset = object_info.data_start_offset + offset;
+                if (data_start_offset > _value.size()) {
+                    return Status::VariantError(
+                            "Offset is out of bounds: " + std::to_string(offset) +
+                            ", data_start_offset: " + std::to_string(object_info.data_start_offset) +
+                            ", value_size: " + std::to_string(_value.size()));
+                }
+                const std::string_view field_value = _value.substr(data_start_offset);
+                return Variant{_metadata, field_value};
             }
-            const std::string_view field_value = _value.substr(data_start_offset);
-            return Variant{_metadata, field_value};
+        }
+    } else {
+        uint32_t low = 0;
+        uint32_t high = object_info.num_elements - 1;
+        while (low <= high) {
+            uint32_t mid = low + (high - low) / 2;
+            uint32_t field_id = readLittleEndianUnsigned(
+                    _value.data() + object_info.id_start_offset + mid * object_info.id_size, object_info.id_size);
+            std::string_view field_key = *_metadata.get_key(field_id);
+            const int cmp = field_key.compare(key);
+            if (cmp == 0) {
+                uint32_t offset = readLittleEndianUnsigned(
+                        _value.data() + object_info.offset_start_offset + mid * object_info.offset_size,
+                        object_info.offset_size);
+                uint32_t data_start_offset = object_info.data_start_offset + offset;
+                if (data_start_offset > _value.size()) {
+                    return Status::VariantError(
+                            "Offset is out of bounds: " + std::to_string(offset) +
+                            ", data_start_offset: " + std::to_string(object_info.data_start_offset) +
+                            ", value_size: " + std::to_string(_value.size()));
+                }
+                const std::string_view field_value = _value.substr(data_start_offset);
+                return Variant{_metadata, field_value};
+            }
+            if (cmp < 0) {
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
         }
     }
 

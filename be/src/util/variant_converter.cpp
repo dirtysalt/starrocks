@@ -18,8 +18,7 @@
 
 namespace starrocks {
 
-StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& variant,
-                                                            ColumnBuilder<TYPE_BOOLEAN>& result) {
+Status cast_variant_to_bool(const Variant& variant, ColumnBuilder<TYPE_BOOLEAN>& result) {
     VariantType type = variant.type();
     if (type == VariantType::NULL_TYPE) {
         result.append_null();
@@ -29,7 +28,7 @@ StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& varia
     if (type == VariantType::BOOLEAN) {
         auto value = variant.get_bool();
         if (!value.ok()) {
-            return value;
+            return value.status();
         }
 
         result.append(value.value());
@@ -43,7 +42,7 @@ StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& varia
             size_t len = str.value().size();
             StringParser::ParseResult parsed;
             auto r = StringParser::string_to_int<int32_t>(str_value, len, &parsed);
-            if (parsed != StringParser::PARSE_SUCCESS || std::isnan(r) || std::isinf(r)) {
+            if (parsed != StringParser::PARSE_SUCCESS) {
                 const bool casted = StringParser::string_to_bool(str_value, len, &parsed);
                 if (parsed != StringParser::PARSE_SUCCESS) {
                     return Status::VariantError(fmt::format("Failed to cast string '{}' to BOOLEAN", str.value()));
@@ -58,15 +57,12 @@ StatusOr<RunTimeCppType<TYPE_BOOLEAN>> cast_variant_to_bool(const Variant& varia
         }
     }
 
-    return Status::NotSupported(
-            fmt::format("Cannot cast variant of type {} to boolean", VariantUtil::type_to_string(type)));
+    return VARIANT_CAST_NOT_SUPPORT(type, TYPE_BOOLEAN);
 }
 
-StatusOr<RunTimeCppType<TYPE_VARCHAR>> cast_variant_to_string(const Variant& variant, const VariantValue& value,
-                                                              const cctz::time_zone& zone,
-                                                              ColumnBuilder<TYPE_VARCHAR>& result) {
-    VariantType type = variant.type();
-    switch (type) {
+Status cast_variant_to_string(const Variant& variant, const cctz::time_zone& zone,
+                              ColumnBuilder<TYPE_VARCHAR>& result) {
+    switch (variant.type()) {
     case VariantType::NULL_TYPE: {
         result.append_null();
         return Status::OK();
@@ -77,11 +73,11 @@ StatusOr<RunTimeCppType<TYPE_VARCHAR>> cast_variant_to_string(const Variant& var
             return str.status();
         }
 
-        Slice slice(str.value().data(), str.value().size());
-        result.append(slice);
+        result.append(Slice(std::string(str.value())));
         return Status::OK();
     }
     default: {
+        const VariantValue value = VariantValue::of_variant(variant);
         std::stringstream ss;
         Status status = VariantUtil::variant_to_json(value.get_metadata(), value.get_value(), ss, zone);
         if (!status.ok()) {

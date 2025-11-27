@@ -125,6 +125,7 @@ public enum PrimitiveType {
                     .add(BOOLEAN)
                     .addAll(NUMBER_TYPE_LIST)
                     .addAll(STRING_TYPE_LIST)
+                    .add(JSON)
                     .build();
 
     public static final ImmutableList<PrimitiveType> VARIANT_UNCOMPATIBLE_TYPE =
@@ -222,6 +223,11 @@ public enum PrimitiveType {
         // VARIANT
         builder.putAll(VARIANT, VARIANT);
         builder.putAll(VARIANT, NULL_TYPE);
+        for (PrimitiveType type : VARIANT_COMPATIBLE_TYPE) {
+            // TODO(xuba): support implicit cast from other types to VARIANT
+            // builder.put(type, VARIANT);
+            builder.put(VARIANT, type);
+        }
 
         IMPLICIT_CAST_MAP = builder.build();
     }

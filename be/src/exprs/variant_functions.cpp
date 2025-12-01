@@ -127,33 +127,28 @@ StatusOr<ColumnPtr> VariantFunctions::_do_variant_query(FunctionContext* context
             continue;
         }
 
-        try {
-            auto field = VariantPath::seek(variant_value, variant_segments_status.value());
-            if (!field.ok()) {
-                result.append_null();
-                continue;
-            }
-
-            RuntimeState* state = context->state();
-            cctz::time_zone zone;
-            if (state == nullptr) {
-                zone = cctz::local_time_zone();
-            } else {
-                zone = context->state()->timezone_obj();
-            }
-
-            if constexpr (ResultType == TYPE_VARIANT) {
-                result.append(std::move(field.value()));
-            } else {
-                Variant field_view(field.value().get_metadata(), field.value().get_value());
-                Status casted = cast_variant_value_to<ResultType, true>(field_view, zone, result);
-                if (!casted.ok()) {
-                    result.append_null();
-                }
-            }
-        } catch (const std::exception& e) {
-            LOG(WARNING) << "Error processing variant query with path " << path_slice.to_string() << ": " << e.what();
+        auto field = VariantPath::seek(variant_value, variant_segments_status.value());
+        if (!field.ok()) {
             result.append_null();
+            continue;
+        }
+
+        RuntimeState* state = context->state();
+        cctz::time_zone zone;
+        if (state == nullptr) {
+            zone = cctz::local_time_zone();
+        } else {
+            zone = context->state()->timezone_obj();
+        }
+
+        if constexpr (ResultType == TYPE_VARIANT) {
+            result.append(std::move(field.value()));
+        } else {
+            Variant field_view(field.value().get_metadata(), field.value().get_value());
+            Status casted = cast_variant_value_to<ResultType, true>(field_view, zone, result);
+            if (!casted.ok()) {
+                result.append_null();
+            }
         }
     }
 

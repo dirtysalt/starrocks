@@ -251,19 +251,20 @@ StatusOr<VariantValue> VariantPath::seek(const VariantValue* value, const Varian
         return Status::InvalidArgument("Variant value and path must not be null");
     }
 
-    VariantValue current = *value;
+    const std::string& metadata = value->get_metadata();
+    const std::string& val = value->get_value();
+    Variant current{metadata, val};
 
     for (size_t seg_idx = 0; seg_idx < variant_path->segments.size(); ++seg_idx) {
         const auto& segment = variant_path->segments[seg_idx];
-        Variant current_view(current.get_metadata(), current.get_value());
 
         StatusOr<Variant> sub;
         std::visit(
             [&]<typename T0>(const T0& seg) {
                 if constexpr (std::is_same_v<std::decay_t<T0>, ObjectExtraction>) {
-                    sub = current_view.get_object_by_key(seg.get_key());
+                    sub = current.get_object_by_key(seg.get_key());
                 } else if constexpr (std::is_same_v<std::decay_t<T0>, ArrayExtraction>) {
-                    sub = current_view.get_element_at_index(seg.get_index());
+                    sub = current.get_element_at_index(seg.get_index());
                 }
             },
             segment);
@@ -272,10 +273,10 @@ StatusOr<VariantValue> VariantPath::seek(const VariantValue* value, const Varian
             return sub.status();
         }
 
-        current = VariantValue(sub->metadata().get_raw(), sub->value());
+        current = Variant{sub->metadata(), sub->value()};
     }
 
-    return current;
+    return VariantValue::of_variant(current);
 }
 
 } // namespace starrocks

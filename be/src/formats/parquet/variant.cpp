@@ -578,14 +578,21 @@ StatusOr<uint32_t> Variant::num_elements() const {
 StatusOr<Variant> Variant::get_object_by_key(std::string_view key) const {
     RETURN_IF_ERROR(validate_basic_type(BasicType::OBJECT));
 
-    auto object_info = *get_object_info(_value);
+    auto obj_status = get_object_info(_value);
+    if (!obj_status.ok()) {
+        return obj_status.status();
+    }
 
+    const ObjectInfo object_info = obj_status.value();
     if (object_info.num_elements < kBinarySearchThreshold) {
         for (uint32_t i = 0; i < object_info.num_elements; ++i) {
             uint32_t field_id = readLittleEndianUnsigned(
                     _value.data() + object_info.id_start_offset + i * object_info.id_size, object_info.id_size);
-            std::string field_key = *_metadata.get_key(field_id);
-            if (field_key == key) {
+            auto field_key = _metadata.get_key(field_id);
+            if (!field_key.ok()) {
+                return field_key.status();
+            }
+            if (field_key.value() == key) {
                 uint32_t offset = readLittleEndianUnsigned(
                         _value.data() + object_info.offset_start_offset + i * object_info.offset_size,
                         object_info.offset_size);
@@ -607,8 +614,11 @@ StatusOr<Variant> Variant::get_object_by_key(std::string_view key) const {
             uint32_t mid = low + (high - low) / 2;
             uint32_t field_id = readLittleEndianUnsigned(
                     _value.data() + object_info.id_start_offset + mid * object_info.id_size, object_info.id_size);
-            std::string_view field_key = *_metadata.get_key(field_id);
-            const int cmp = field_key.compare(key);
+            auto field_key = _metadata.get_key(field_id);
+            if (!field_key.ok()) {
+                return field_key.status();
+            }
+            const int cmp = field_key.value().compare(key);
             if (cmp == 0) {
                 uint32_t offset = readLittleEndianUnsigned(
                         _value.data() + object_info.offset_start_offset + mid * object_info.offset_size,
@@ -631,7 +641,7 @@ StatusOr<Variant> Variant::get_object_by_key(std::string_view key) const {
         }
     }
 
-    return Status::VariantError("Field key not found: " + std::string(key));
+    return Status::NotFound("Field key not found: " + std::string(key));
 }
 
 StatusOr<Variant> Variant::get_element_at_index(uint32_t index) const {

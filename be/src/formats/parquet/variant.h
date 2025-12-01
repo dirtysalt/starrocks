@@ -93,7 +93,7 @@ public:
     // return the index for the key in the dictionary, or -1 if not found
     uint32_t get_index(std::string_view key) const;
     // return the field name for the index
-    StatusOr<std::string_view> get_key(uint32_t index) const;
+    StatusOr<std::string> get_key(uint32_t index) const;
 
     // return the metadata raw string view
     std::string_view get_raw() const { return _metadata; }

@@ -21,6 +21,7 @@
 
 #include "common/statusor.h"
 #include "formats/parquet/variant.h"
+#include "types/variant_value.h"
 #include "util/slice.h"
 
 namespace starrocks {
@@ -63,7 +64,7 @@ struct VariantPath {
     void reset(VariantPath&& rhs);
 
     // Seek into a variant using the parsed segments
-    static StatusOr<Variant> seek(const Variant* variant, const VariantPath* variant_path);
+    static StatusOr<VariantValue> seek(const VariantValue* value, const VariantPath* variant_path);
 };
 
 struct NativeVariantPath {

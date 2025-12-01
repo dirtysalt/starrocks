@@ -87,8 +87,8 @@ StatusOr<VariantValue> VariantValue::create(const Slice& metadata, const Slice& 
 
 // Create a VariantValue from a Parquet Variant.
 VariantValue VariantValue::of_variant(const Variant& variant) {
-    const std::string_view metadata = variant.metadata().get_raw();
-    const std::string_view value = variant.value();
+    const std::string metadata(variant.metadata().get_raw());
+    const std::string value(variant.value());
 
     return VariantValue(metadata, value);
 }

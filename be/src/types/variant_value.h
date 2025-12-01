@@ -81,6 +81,11 @@ public:
     StatusOr<std::string> to_json(cctz::time_zone timezone = cctz::local_time_zone()) const;
     std::string to_string() const;
 
+    void assign(const std::string& metadata, const std::string& value) {
+        _metadata.assign(metadata);
+        _value.assign(value);
+    }
+
     const std::string& get_metadata() const { return _metadata; }
     const std::string& get_value() const { return _value; }
 

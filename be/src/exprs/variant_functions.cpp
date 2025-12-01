@@ -102,13 +102,11 @@ StatusOr<ColumnPtr> VariantFunctions::_do_variant_query(FunctionContext* context
         return Status::InvalidArgument("Variant query functions requires 2 arguments");
     }
 
+    const auto variant_viewer = ColumnViewer<TYPE_VARIANT>(columns[0]);
+    const auto json_path_viewer = ColumnViewer<TYPE_VARCHAR>(columns[1]);
+
     size_t num_rows = columns[0]->size();
-
-    auto variant_viewer = ColumnViewer<TYPE_VARIANT>(columns[0]);
-    auto json_path_viewer = ColumnViewer<TYPE_VARCHAR>(columns[1]);
-
     ColumnBuilder<ResultType> result(num_rows);
-
     VariantPath stored_path;
     for (size_t row = 0; row < num_rows; ++row) {
         if (variant_viewer.is_null(row) || json_path_viewer.is_null(row)) {
@@ -124,21 +122,14 @@ StatusOr<ColumnPtr> VariantFunctions::_do_variant_query(FunctionContext* context
         }
 
         const VariantValue* variant_value = variant_viewer.value(row);
-        if (!variant_value) {
-            result.append_null();
-            continue;
-        }
-
-        const std::string& value = variant_value->get_value();
-        if (value.empty()) {
+        if (variant_value == nullptr) {
             result.append_null();
             continue;
         }
 
         try {
-            Variant variant(variant_value->get_metadata(), value);
-            StatusOr<Variant> variant_field = VariantPath::seek(&variant, variant_segments_status.value());
-            if (!variant_field.ok()) {
+            auto field = VariantPath::seek(variant_value, variant_segments_status.value());
+            if (!field.ok()) {
                 result.append_null();
                 continue;
             }
@@ -152,11 +143,11 @@ StatusOr<ColumnPtr> VariantFunctions::_do_variant_query(FunctionContext* context
             }
 
             if constexpr (ResultType == TYPE_VARIANT) {
-                VariantValue sub_variant_value = VariantValue::of_variant(variant_field.value());
-                result.append(std::move(sub_variant_value));
+                result.append(std::move(field.value()));
             } else {
-                Status status = cast_variant_value_to<ResultType, true>(variant_field.value(), zone, result);
-                if (!status.ok()) {
+                Variant field_view(field.value().get_metadata(), field.value().get_value());
+                Status casted = cast_variant_value_to<ResultType, true>(field_view, zone, result);
+                if (!casted.ok()) {
                     result.append_null();
                 }
             }

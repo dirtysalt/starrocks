@@ -246,27 +246,33 @@ void VariantPath::reset(VariantPath&& rhs) {
     segments = std::move(rhs.segments);
 }
 
-StatusOr<Variant> VariantPath::seek(const Variant* variant, const VariantPath* variant_path) {
-    Variant current = *variant;
+StatusOr<VariantValue> VariantPath::seek(const VariantValue* value, const VariantPath* variant_path) {
+    if (value == nullptr || variant_path == nullptr) {
+        return Status::InvalidArgument("Variant value and path must not be null");
+    }
 
-    for (const auto& segment : variant_path->segments) {
-        StatusOr<Variant> result;
+    VariantValue current = *value;
 
+    for (size_t seg_idx = 0; seg_idx < variant_path->segments.size(); ++seg_idx) {
+        const auto& segment = variant_path->segments[seg_idx];
+        Variant current_view(current.get_metadata(), current.get_value());
+
+        StatusOr<Variant> sub;
         std::visit(
-                [&]<typename T0>(const T0& seg) {
-                    if constexpr (std::is_same_v<std::decay_t<T0>, ObjectExtraction>) {
-                        result = current.get_object_by_key(seg.get_key());
-                    } else if constexpr (std::is_same_v<std::decay_t<T0>, ArrayExtraction>) {
-                        result = current.get_element_at_index(seg.get_index());
-                    }
-                },
-                segment);
+            [&]<typename T0>(const T0& seg) {
+                if constexpr (std::is_same_v<std::decay_t<T0>, ObjectExtraction>) {
+                    sub = current_view.get_object_by_key(seg.get_key());
+                } else if constexpr (std::is_same_v<std::decay_t<T0>, ArrayExtraction>) {
+                    sub = current_view.get_element_at_index(seg.get_index());
+                }
+            },
+            segment);
 
-        if (!result.ok()) {
-            return result.status();
+        if (!sub.ok()) {
+            return sub.status();
         }
 
-        current = std::move(result.value());
+        current = VariantValue(sub->metadata().get_raw(), sub->value());
     }
 
     return current;

@@ -63,7 +63,7 @@ uint32_t VariantMetadata::dict_size() const {
     return _dict_size;
 }
 
-StatusOr<std::string_view> VariantMetadata::get_key(uint32_t index) const {
+StatusOr<std::string> VariantMetadata::get_key(uint32_t index) const {
     uint8_t offset_sz = offset_size();
     uint32_t dict_sz = dict_size();
     if (index >= dict_sz) {
@@ -80,7 +80,7 @@ StatusOr<std::string_view> VariantMetadata::get_key(uint32_t index) const {
         return Status::VariantError("Variant string out of range");
     }
 
-    std::string_view field_key(_metadata.data() + string_start, key_size);
+    std::string field_key(_metadata.data() + string_start, key_size);
     return field_key;
 }
 
@@ -584,7 +584,7 @@ StatusOr<Variant> Variant::get_object_by_key(std::string_view key) const {
         for (uint32_t i = 0; i < object_info.num_elements; ++i) {
             uint32_t field_id = readLittleEndianUnsigned(
                     _value.data() + object_info.id_start_offset + i * object_info.id_size, object_info.id_size);
-            std::string_view field_key = *_metadata.get_key(field_id);
+            std::string field_key = *_metadata.get_key(field_id);
             if (field_key == key) {
                 uint32_t offset = readLittleEndianUnsigned(
                         _value.data() + object_info.offset_start_offset + i * object_info.offset_size,

@@ -33,14 +33,11 @@ inline uint32_t readLittleEndianUnsigned(const void* from, uint8_t size) {
 VariantMetadata::VariantMetadata(std::string_view metadata) : _metadata(metadata) {
     // Empty metadata is at least 3 bytes: version, dictionarySize and
     // at least one offset.
-    if (metadata.size() < 3) {
-        throw Status::VariantError("Variant metadata size is too short: " + std::to_string(metadata.size()));
-    }
+    DCHECK(!metadata.empty()) << "Variant metadata cannot be empty";
+    DCHECK(metadata.size() >= 3) << "Variant metadata size is too short: " << std::to_string(metadata.size());
 
     const uint8_t version = header() & kVersionMask;
-    if (version != kSupportedVersion) {
-        throw Status::VariantError("Unsupported variant version: " + std::to_string(version));
-    }
+    DCHECK(version == kSupportedVersion) << "Unsupported variant version: " << std::to_string(version);
 
     const uint8_t offset_sz = offset_size();
     _dict_size = readLittleEndianUnsigned(metadata.data() + kHeaderSizeBytes, offset_sz);
@@ -144,7 +141,7 @@ uint32_t VariantMetadata::get_index(std::string_view key) const {
 
 // Variant value class
 Variant::Variant(const VariantMetadata& metadata, std::string_view value) : _metadata(metadata), _value(value) {
-    DCHECK(!value.empty());
+    DCHECK(!value.empty()) << "Variant value cannot be empty";
 }
 
 BasicType Variant::basic_type() const {
@@ -586,6 +583,9 @@ StatusOr<Variant> Variant::get_object_by_key(std::string_view key) const {
     const ObjectInfo object_info = obj_status.value();
     if (object_info.num_elements < kBinarySearchThreshold) {
         for (uint32_t i = 0; i < object_info.num_elements; ++i) {
+            DCHECK(!_value.empty()) << "Object value cannot be empty for key: " << std::string(key);
+            DCHECK(object_info.id_start_offset + i * object_info.id_size + object_info.id_size <= _value.size())
+                    << "Object value is too short for key: " << std::string(key);
             uint32_t field_id = readLittleEndianUnsigned(
                     _value.data() + object_info.id_start_offset + i * object_info.id_size, object_info.id_size);
             auto field_key = _metadata.get_key(field_id);
@@ -597,7 +597,7 @@ StatusOr<Variant> Variant::get_object_by_key(std::string_view key) const {
                         _value.data() + object_info.offset_start_offset + i * object_info.offset_size,
                         object_info.offset_size);
                 uint32_t data_start_offset = object_info.data_start_offset + offset;
-                if (data_start_offset > _value.size()) {
+                if (data_start_offset >= _value.size()) {
                     return Status::VariantError(
                             "Offset is out of bounds: " + std::to_string(offset) +
                             ", data_start_offset: " + std::to_string(object_info.data_start_offset) +
@@ -612,6 +612,8 @@ StatusOr<Variant> Variant::get_object_by_key(std::string_view key) const {
         uint32_t high = object_info.num_elements - 1;
         while (low <= high) {
             uint32_t mid = low + (high - low) / 2;
+            DCHECK(object_info.id_start_offset + mid * object_info.id_size + object_info.id_size <= _value.size())
+                    << "Object value is too short for key: " << std::string(key);
             uint32_t field_id = readLittleEndianUnsigned(
                     _value.data() + object_info.id_start_offset + mid * object_info.id_size, object_info.id_size);
             auto field_key = _metadata.get_key(field_id);
@@ -624,7 +626,7 @@ StatusOr<Variant> Variant::get_object_by_key(std::string_view key) const {
                         _value.data() + object_info.offset_start_offset + mid * object_info.offset_size,
                         object_info.offset_size);
                 uint32_t data_start_offset = object_info.data_start_offset + offset;
-                if (data_start_offset > _value.size()) {
+                if (data_start_offset >= _value.size()) {
                     return Status::VariantError(
                             "Offset is out of bounds: " + std::to_string(offset) +
                             ", data_start_offset: " + std::to_string(object_info.data_start_offset) +
@@ -660,7 +662,7 @@ StatusOr<Variant> Variant::get_element_at_index(uint32_t index) const {
 
     uint32_t offset = readLittleEndianUnsigned(_value.data() + info.offset_start_offset + index * info.offset_size,
                                                info.offset_size);
-    if (info.data_start_offset + offset > _value.size()) {
+    if (info.data_start_offset + offset >= _value.size()) {
         return Status::VariantError("Offset is out of bounds: " + std::to_string(offset) +
                                     ", data_start_offset: " + std::to_string(info.data_start_offset) +
                                     ", value_size: " + std::to_string(_value.size()));

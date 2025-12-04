@@ -253,6 +253,9 @@ StatusOr<VariantValue> VariantPath::seek(const VariantValue* value, const Varian
 
     const std::string& metadata = value->get_metadata();
     const std::string& val = value->get_value();
+    if (val.empty()) {
+        return Status::InvalidArgument("Variant value is empty");
+    }
     Variant current{metadata, val};
 
     for (size_t seg_idx = 0; seg_idx < variant_path->segments.size(); ++seg_idx) {

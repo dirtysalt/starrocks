@@ -125,6 +125,8 @@ public:
     static constexpr size_t kDecimalScaleSizeBytes = 1;
     static constexpr uint8_t kBasicTypeMask = 0b00000011;
     static constexpr uint8_t kValueHeaderBitShift = 2;
+    static constexpr char kNullChar[] = {static_cast<uint8_t>(VariantPrimitiveType::NULL_TYPE) << 2};
+    static constexpr std::string_view kNullValue{kNullChar, 1};
 
     BasicType basic_type() const;
     const VariantMetadata& metadata() const;

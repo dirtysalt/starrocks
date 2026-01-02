@@ -34,9 +34,9 @@
 #include "formats/parquet/utils.h"
 #include "fs/fs.h"
 #include "gen_cpp/parquet_types.h"
-#include "gutil/casts.h"
 #include "gutil/strings/substitute.h"
 #include "io/shared_buffered_input_stream.h"
+#include "util/thrift_util.h"
 
 namespace starrocks::parquet {
 
@@ -61,6 +61,12 @@ Status FileReader::init(HdfsScannerContext* ctx) {
     // parse FileMetadata
     FileMetaDataParser file_metadata_parser{_file, ctx, _cache, &_datacache_options, _file_size};
     ASSIGN_OR_RETURN(_file_metadata, file_metadata_parser.get_file_metadata());
+
+    stringstream ss;
+    for (const ParquetField& field : _file_metadata->schema().get_parquet_fields()) {
+        ss << field.name << ", ";
+    }
+    VLOG_FILE << "parquet file schema: " << ss.str();
 
     // set existed SlotDescriptor in this parquet file
     std::unordered_set<std::string> existed_column_names;

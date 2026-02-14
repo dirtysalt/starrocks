@@ -1429,7 +1429,7 @@ DEFINE_STRING_UNARY_FN_WITH_IMPL(DoubleCastToString, v) {
     template <>                                                                                             \
     template <>                                                                                             \
     inline ColumnPtr StringUnaryFunction<CastToString>::evaluate<FROM_TYPE, TO_TYPE>(const ColumnPtr& v1) { \
-        auto& r1 = ColumnHelper::cast_to_raw<FROM_TYPE>(v1) -> get_data();                                  \
+        auto& r1 = ColumnHelper::cast_to_raw<FROM_TYPE>(v1)->get_data();                                    \
         auto result = RunTimeColumnType<TO_TYPE>::create();                                                 \
         auto& offset = result->get_offset();                                                                \
         offset.resize(v1->size() + 1);                                                                      \

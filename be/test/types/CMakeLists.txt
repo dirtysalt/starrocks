@@ -27,7 +27,7 @@ set(TYPES_TEST_FILES
     tdigest_test.cpp
     timestamp_value_test.cpp
     type_info_test.cpp
-    variant_value_test.cpp
+    variant_row_value_test.cpp
 )
 
 set(TYPES_TEST_LINK_LIBS

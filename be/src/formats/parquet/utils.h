@@ -25,8 +25,6 @@ class FileMetaData;
 
 namespace starrocks::parquet {
 
-struct ParquetField;
-
 enum ColumnContentType { VALUE, DICT_CODE };
 
 enum ColumnIOType { INVALID = 0, PAGE_INDEX = 1, PAGES = 2, BLOOM_FILTER = 4 };
@@ -36,8 +34,6 @@ using ColumnIOTypeFlags = int32_t;
 
 class ParquetUtils {
 public:
-    static TypeDescriptor to_type_desc(const ParquetField& field);
-
     static CompressionTypePB convert_compression_codec(tparquet::CompressionCodec::type parquet_codec);
 
     static int decimal_precision_to_byte_count(int precision);

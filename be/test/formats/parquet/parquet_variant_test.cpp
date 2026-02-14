@@ -22,7 +22,7 @@
 #include "base/url_coding.h"
 #include "types/decimalv3.h"
 #include "types/timestamp_value.h"
-#include "types/variant.h"
+#include "types/variant_base.h"
 
 namespace starrocks::parquet {
 

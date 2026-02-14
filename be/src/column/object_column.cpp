@@ -22,7 +22,7 @@
 #include "types/hll.h"
 #include "types/json_value.h"
 #include "types/percentile_value.h"
-#include "types/variant_value.h"
+#include "types/variant_row_value.h"
 
 namespace starrocks {
 

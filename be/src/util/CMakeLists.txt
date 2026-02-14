@@ -74,8 +74,6 @@ set(UTIL_FILES
   internal_service_recoverable_stub.cpp
   lake_service_recoverable_stub.cpp
   byte_buffer.cpp
-  variant_converter.cpp
-  variant_encoder.cpp
   jvm_metrics.cpp
   llm_cache.cpp
   llm_query_service.cpp

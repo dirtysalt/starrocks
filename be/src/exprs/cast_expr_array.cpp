@@ -18,6 +18,7 @@
 #include "column/column_helper.h"
 #include "column/column_viewer.h"
 #include "column/json_column.h"
+#include "column/variant_column.h"
 #include "exprs/cast_expr.h"
 #include "exprs/expr_context.h"
 #include "gutil/casts.h"
@@ -321,6 +322,7 @@ StatusOr<ColumnPtr> CastVariantToArray::evaluate_checked(ExprContext* context, C
     DCHECK(_cast_elements_expr != nullptr);
     const LogicalType element_type = _cast_elements_expr->type().type;
     const ColumnViewer<TYPE_VARIANT> src(column);
+    const auto* variant_data_column = down_cast<const VariantColumn*>(ColumnHelper::get_data_column(column.get()));
     UInt32Column::MutablePtr offsets = UInt32Column::create();
     NullColumn::MutablePtr null_column = NullColumn::create();
 
@@ -335,7 +337,9 @@ StatusOr<ColumnPtr> CastVariantToArray::evaluate_checked(ExprContext* context, C
             continue;
         }
 
-        const VariantRowValue* variant = src.value(i);
+        const size_t variant_row = column->is_constant() ? 0 : i;
+        VariantRowValue variant_buffer;
+        const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
         if (variant == nullptr) {
             null_column->append(1);
             continue;
@@ -370,9 +374,9 @@ StatusOr<ColumnPtr> CastVariantToArray::evaluate_checked(ExprContext* context, C
 
     // 3. Assemble elements into array column
     MutableColumnPtr res = ArrayColumn::create(std::move(elements)->as_mutable_ptr(), std::move(offsets));
-    if (column->is_nullable()) {
-        res = NullableColumn::create(std::move(res), std::move(null_column));
-    }
+    // Cast from variant may generate null rows for non-array/null variant values even when source
+    // column itself is non-nullable, so keep the per-row null bitmap.
+    res = NullableColumn::create(std::move(res), std::move(null_column));
     if (column->is_constant()) {
         res = ConstColumn::create(std::move(res), column->size());
     }

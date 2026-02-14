@@ -14,7 +14,6 @@ set(EXEC_FILES
         ./column/decimalv3_column_test.cpp
         ./column/fixed_length_column_extended_test.cpp
         ./column/json_column_test.cpp
-        ./column/variant_column_extended_test.cpp
         ./column/map_column_test.cpp
         ./column/struct_column_test.cpp
         ./column/nullable_column_test.cpp
@@ -344,6 +343,7 @@ set(EXEC_FILES
         ./util/metrics/file_scan_metrics_test.cpp
         ./util/parse_util_test.cpp
         ./util/rle_encoding_test.cpp
+        ./common/runtime_profile_test.cpp
         ./base/raw_container_test.cpp
         ./util/string_util_test.cpp
         ./util/thread_test.cpp

@@ -14,26 +14,26 @@
 
 #pragma once
 
+#include <string_view>
+
+#include "base/status.h"
+#include "base/statusor.h"
 #include "column/column.h"
 #include "column/column_builder.h"
-#include "common/statusor.h"
 #include "types/json_value.h"
 #include "types/type_descriptor.h"
-#include "types/variant_value.h"
+#include "types/variant_row_value.h"
 #include "velocypack/Slice.h"
 
 namespace starrocks {
 
 class VariantEncoder {
 public:
-    // cast column to variant column
     static Status encode_column(const ColumnPtr& column, const TypeDescriptor& type,
                                 ColumnBuilder<TYPE_VARIANT>* builder, bool allow_throw_exception);
-    // cast a single json value to variant value
+    static StatusOr<VariantRowValue> encode_vslice_to_variant(const vpack::Slice& slice);
     static StatusOr<VariantRowValue> encode_json_to_variant(const JsonValue& json);
-    // cast a single row possibly shredded column to variant value
-    static StatusOr<VariantRowValue> encode_shredded_column_row(const ColumnPtr& column, const TypeDescriptor& type,
-                                                                size_t row, VariantEncodingContext* ctx = nullptr);
+    static StatusOr<VariantRowValue> encode_json_text_to_variant(std::string_view json_text);
 };
 
 } // namespace starrocks

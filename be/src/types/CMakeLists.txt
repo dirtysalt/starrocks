@@ -34,8 +34,8 @@ ADD_BE_LIB(TypesCore
     tdigest.cpp
     time_types.cpp
     timestamp_value.cpp
-    variant.cpp
-    variant_value.cpp
+    variant_base.cpp
+    variant_row_value.cpp
 )
 
 ADD_BE_LIB(Types

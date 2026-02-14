@@ -48,7 +48,7 @@ bool VariantPathParser::is_digit(char c) {
 bool VariantPathParser::is_valid_key_char(char c) {
     // Valid unquoted key characters: letters, digits, underscore
     // Exclude dots and brackets which are delimiters
-    return std::isalnum(c) || c == '_';
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
 }
 
 bool VariantPathParser::parse_root(ParserState& state) {
@@ -243,6 +243,23 @@ void VariantPath::reset(const VariantPath& rhs) {
 
 void VariantPath::reset(VariantPath&& rhs) {
     segments = std::move(rhs.segments);
+}
+
+std::optional<std::string> VariantPath::to_shredded_path() const {
+    std::string path;
+    for (size_t i = 0; i < segments.size(); ++i) {
+        const auto& segment = segments[i];
+        if (const auto* object = std::get_if<VariantObjectExtraction>(&segment); object != nullptr) {
+            if (i > 0) {
+                path.push_back('.');
+            }
+            path.append(object->get_key());
+        } else {
+            // ARRAY path is not mapped into typed shredded path now.
+            return std::nullopt;
+        }
+    }
+    return path;
 }
 
 StatusOr<VariantRowValue> VariantPath::seek(const VariantRowValue* variant, const VariantPath* variant_path) {

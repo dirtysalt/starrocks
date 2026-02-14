@@ -28,7 +28,7 @@
 #include "types/constexpr.h"
 #include "types/json_value.h"
 #include "types/logical_type.h"
-#include "types/variant_value.h"
+#include "types/variant_row_value.h"
 
 namespace starrocks {
 

@@ -39,7 +39,11 @@ ADD_BE_LIB(ColumnCore
         type_traits.cpp
         column_view/column_view_base.cpp
         column_view/column_view_helper.cpp
+        variant_encoder.cpp
+        variant_builder.cpp
+        variant_merger.cpp
         column_hash/column_hash.cpp
+        german_string.cpp
 )
 
 ADD_BE_LIB(ChunkCore
@@ -54,8 +58,8 @@ ADD_BE_LIB(Column
         chunk_slice.cpp
         column_helper_time.cpp
         append_with_mask.cpp
-        column_viewer.cpp
         datum_convert.cpp
+        column_viewer.cpp
         datum_tuple.cpp
         stream_chunk.cpp
 )

@@ -213,4 +213,30 @@ TEST_F(VariantPathParserBasicTest, SpecificPathTests) {
     }
 }
 
+// Verifies "$" can map to root shredded path "".
+TEST_F(VariantPathParserBasicTest, ToShreddedPathRoot) {
+    auto result = VariantPathParser::parse(std::string("$"));
+    ASSERT_TRUE(result.ok());
+    auto shredded = result->to_shredded_path();
+    ASSERT_TRUE(shredded.has_value());
+    ASSERT_EQ("", shredded.value());
+}
+
+// Verifies pure object path can map to dotted shredded path.
+TEST_F(VariantPathParserBasicTest, ToShreddedPathObject) {
+    auto result = VariantPathParser::parse(std::string("$.a.b"));
+    ASSERT_TRUE(result.ok());
+    auto shredded = result->to_shredded_path();
+    ASSERT_TRUE(shredded.has_value());
+    ASSERT_EQ("a.b", shredded.value());
+}
+
+// Verifies paths with array segments cannot map to shredded typed path.
+TEST_F(VariantPathParserBasicTest, ToShreddedPathArrayReturnsNullopt) {
+    auto result = VariantPathParser::parse(std::string("$.a[1].b"));
+    ASSERT_TRUE(result.ok());
+    auto shredded = result->to_shredded_path();
+    ASSERT_FALSE(shredded.has_value());
+}
+
 } // namespace starrocks

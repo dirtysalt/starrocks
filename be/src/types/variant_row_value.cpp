@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "types/variant_value.h"
+#include "types/variant_row_value.h"
 
 #include <cstring>
 #include <sstream>

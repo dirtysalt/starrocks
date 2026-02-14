@@ -14,14 +14,15 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "base/statusor.h"
 #include "base/string/slice.h"
-#include "common/statusor.h"
-#include "types/variant_value.h"
+#include "types/variant_row_value.h"
 
 namespace starrocks {
 
@@ -61,6 +62,7 @@ struct VariantPath {
 
     void reset(const VariantPath& rhs);
     void reset(VariantPath&& rhs);
+    std::optional<std::string> to_shredded_path() const;
 
     // Seek into a variant using the parsed segments
     static StatusOr<VariantRowValue> seek(const VariantRowValue* value, const VariantPath* variant_path);

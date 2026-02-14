@@ -18,6 +18,7 @@
 #include "column/column_helper.h"
 #include "column/column_viewer.h"
 #include "column/json_column.h"
+#include "column/variant_column.h"
 #include "exprs/cast_expr.h"
 #include "exprs/expr_context.h"
 #include "gutil/casts.h"
@@ -137,6 +138,7 @@ StatusOr<ColumnPtr> CastVariantToStruct::evaluate_checked(ExprContext* context, 
     }
 
     ColumnViewer<TYPE_VARIANT> viewer(column);
+    const auto* variant_data_column = down_cast<const VariantColumn*>(ColumnHelper::get_data_column(column.get()));
     NullColumn::MutablePtr null_column = NullColumn::create();
 
     // 1. Cast struct fields to variant columns.
@@ -154,7 +156,13 @@ StatusOr<ColumnPtr> CastVariantToStruct::evaluate_checked(ExprContext* context, 
             continue;
         }
 
-        const VariantRowValue* variant = viewer.value(row);
+        const size_t variant_row = column->is_constant() ? 0 : row;
+        VariantRowValue variant_buffer;
+        const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
+        if (variant == nullptr) {
+            APPEND_NULL(variant_columns, null_column);
+            continue;
+        }
         const VariantValue& value = variant->get_value();
         if (value.type() != VariantType::OBJECT) {
             APPEND_NULL(variant_columns, null_column);

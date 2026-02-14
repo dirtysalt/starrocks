@@ -31,7 +31,7 @@
 #include "gutil/strings/substitute.h"
 #include "types/hll.h"
 #include "types/json_value.h"
-#include "types/variant.h"
+#include "types/variant_base.h"
 #include "util/hash_util.hpp"
 
 namespace starrocks::serde {

@@ -36,6 +36,8 @@
 #include "column/column_viewer.h"
 #include "column/nullable_column.h"
 #include "column/type_traits.h"
+#include "column/variant_column.h"
+#include "column/variant_encoder.h"
 #include "column/vectorized_fwd.h"
 #include "common/object_pool.h"
 #include "common/status.h"
@@ -44,6 +46,7 @@
 #include "exprs/column_ref.h"
 #include "exprs/decimal_cast_expr.h"
 #include "exprs/unary_function.h"
+#include "exprs/variant_converter.h"
 #include "gutil/casts.h"
 #include "runtime/exception.h"
 #include "runtime/runtime_state.h"
@@ -55,8 +58,6 @@
 #include "util/date_func.h"
 #include "util/json_converter.h"
 #include "util/numeric_types.h"
-#include "util/variant_converter.h"
-#include "util/variant_encoder.h"
 
 #ifdef STARROCKS_JIT_ENABLE
 #include "exprs/jit/ir_helper.h"
@@ -69,10 +70,10 @@ namespace starrocks {
     ss << "not supported type " << type_to_string(TYPE); \
     throw RuntimeException(ss.str())
 
-#define THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FROMTYPE, TOTYPE, VALUE) \
-    std::stringstream ss;                                                 \
-    ss << "cast from " << type_to_string(FROMTYPE) << "(" << VALUE << ")" \
-       << " to " << type_to_string(TOTYPE) << " failed";                  \
+#define THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FROMTYPE, TOTYPE, VALUE)                                     \
+    std::stringstream ss;                                                                                     \
+    ss << "cast from " << type_to_string(FROMTYPE) << "(" << VALUE << ")" << " to " << type_to_string(TOTYPE) \
+       << " failed";                                                                                          \
     throw RuntimeException(ss.str())
 
 template <LogicalType FromType, LogicalType ToType, bool AllowThrowException = false>
@@ -158,6 +159,7 @@ template <LogicalType FromType, LogicalType ToType, bool AllowThrowException>
 static ColumnPtr cast_to_json_fn(ColumnPtr& column) {
     ColumnViewer<FromType> viewer(column);
     ColumnBuilder<TYPE_JSON> builder(viewer.size());
+    const auto* variant_data_column = down_cast<const VariantColumn*>(ColumnHelper::get_data_column(column.get()));
 
     for (int row = 0; row < viewer.size(); ++row) {
         if (viewer.is_null(row)) {
@@ -192,15 +194,24 @@ static ColumnPtr cast_to_json_fn(ColumnPtr& column) {
             std::string str = CastToString::apply<RunTimeCppType<FromType>, std::string>(v);
             value = JsonValue::from_string(str);
         } else if constexpr (lt_is_variant<FromType>) {
-            auto json_str = static_cast<VariantRowValue*>(viewer.value(row))->to_json(cctz::local_time_zone());
-            if (!json_str.ok()) {
+            const size_t variant_row = column->is_constant() ? 0 : row;
+            VariantRowValue variant_buffer;
+            const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
+            if (variant == nullptr) {
                 overflow = true;
-            } else {
-                auto parsed = JsonValue::parse_json_or_string(json_str.value());
-                if (parsed.ok()) {
-                    value = parsed.value();
-                } else {
+            }
+
+            if (!overflow) {
+                auto json_str = variant->to_json(cctz::local_time_zone());
+                if (!json_str.ok()) {
                     overflow = true;
+                } else {
+                    auto parsed = JsonValue::parse_json_or_string(json_str.value());
+                    if (parsed.ok()) {
+                        value = parsed.value();
+                    } else {
+                        overflow = true;
+                    }
                 }
             }
         } else {
@@ -253,6 +264,7 @@ template <LogicalType FromType, LogicalType ToType, bool AllowThrowException>
 static ColumnPtr cast_from_variant_fn(ColumnPtr& column) {
     ColumnViewer<TYPE_VARIANT> viewer(column);
     ColumnBuilder<ToType> builder(viewer.size());
+    const auto* variant_data_column = down_cast<const VariantColumn*>(ColumnHelper::get_data_column(column.get()));
 
     for (int row = 0; row < viewer.size(); ++row) {
         if (viewer.is_null(row)) {
@@ -260,7 +272,30 @@ static ColumnPtr cast_from_variant_fn(ColumnPtr& column) {
             continue;
         }
 
-        const VariantRowValue* variant = viewer.value(row);
+        const size_t variant_row = column->is_constant() ? 0 : row;
+        if (variant_data_column->is_root_typed_only_variant()) {
+            const Column* typed_column = variant_data_column->typed_column_by_index(0);
+            DCHECK(typed_column != nullptr);
+            size_t typed_row = typed_column->is_constant() ? 0 : variant_row;
+            if (typed_column->is_null(typed_row)) {
+                builder.append_null();
+                continue;
+            }
+            Datum typed_datum = typed_column->get(typed_row);
+            if (typed_datum.is_null()) {
+                builder.append_null();
+                continue;
+            }
+
+            const LogicalType typed_type = variant_data_column->shredded_types()[0].type;
+            if (typed_type == ToType) {
+                builder.append(typed_datum.get<RunTimeCppType<ToType>>());
+                continue;
+            }
+        }
+
+        VariantRowValue variant_buffer;
+        const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
         if (variant == nullptr) {
             builder.append_null();
             continue;
@@ -454,12 +489,11 @@ DEFINE_UNARY_FN_WITH_IMPL(NumberCheckWithThrowException, value) {
     if (result) {
         std::stringstream ss;
         if constexpr (std::is_same_v<Type, __int128_t>) {
-            ss << int128_to_string(value) << " conflict with range of "
-               << "(" << int128_to_string((Type)std::numeric_limits<ResultType>::lowest()) << ", "
+            ss << int128_to_string(value) << " conflict with range of " << "("
+               << int128_to_string((Type)std::numeric_limits<ResultType>::lowest()) << ", "
                << int128_to_string((Type)std::numeric_limits<ResultType>::max()) << ")";
         } else {
-            ss << value << " conflict with range of "
-               << "(" << (Type)std::numeric_limits<ResultType>::lowest() << ", "
+            ss << value << " conflict with range of " << "(" << (Type)std::numeric_limits<ResultType>::lowest() << ", "
                << (Type)std::numeric_limits<ResultType>::max() << ")";
         }
         throw std::runtime_error(ss.str());
@@ -1255,8 +1289,8 @@ public:
             return Status::NotSupported("JIT casting does not support decimal");
         } else {
             ASSIGN_OR_RETURN(datum.value, IRHelper::cast_to_type(b, l, FromType, ToType));
-            if constexpr ((lt_is_integer<FromType> || lt_is_float<FromType>)&&(lt_is_integer<ToType> ||
-                                                                               lt_is_float<ToType>)) {
+            if constexpr ((lt_is_integer<FromType> || lt_is_float<FromType>) &&
+                          (lt_is_integer<ToType> || lt_is_float<ToType>)) {
                 typedef RunTimeCppType<FromType> FromCppType;
                 typedef RunTimeCppType<ToType> ToCppType;
                 if constexpr ((std::is_floating_point_v<ToCppType> || std::is_floating_point_v<FromCppType>)
@@ -1304,8 +1338,8 @@ public:
     std::string debug_string() const override {
         std::stringstream out;
         auto expr_debug_string = Expr::debug_string();
-        out << "VectorizedCastExpr ("
-            << "from=" << _children[0]->type().debug_string() << ", to expr=" << expr_debug_string << ")";
+        out << "VectorizedCastExpr (" << "from=" << _children[0]->type().debug_string()
+            << ", to expr=" << expr_debug_string << ")";
         return out.str();
     }
 };
@@ -1352,9 +1386,8 @@ DEFINE_BINARY_FUNCTION_WITH_IMPL(timeToDatetime, date, time) {
         std::string debug_string() const override {                                                             \
             std::stringstream out;                                                                              \
             auto expr_debug_string = Expr::debug_string();                                                      \
-            out << "VectorizedCastExpr ("                                                                       \
-                << "from=" << _children[0]->type().debug_string() << ", to=" << this->type().debug_string()     \
-                << ", expr=" << expr_debug_string << ")";                                                       \
+            out << "VectorizedCastExpr (" << "from=" << _children[0]->type().debug_string()                     \
+                << ", to=" << this->type().debug_string() << ", expr=" << expr_debug_string << ")";             \
             return out.str();                                                                                   \
         }                                                                                                       \
                                                                                                                 \

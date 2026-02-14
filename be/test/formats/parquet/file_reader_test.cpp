@@ -25,12 +25,9 @@
 #include "cache/disk_cache/starcache_engine.h"
 #include "cache/disk_cache/test_cache_utils.h"
 #include "cache/mem_cache/lrucache_engine.h"
-#include "column/array_column.h"
-#include "column/binary_column.h"
 #include "column/column_helper.h"
 #include "column/fixed_length_column.h"
-#include "column/nullable_column.h"
-#include "column/struct_column.h"
+#include "column/variant_encoder.h"
 #include "common/logging.h"
 #include "exec/hdfs_scanner/hdfs_scanner.h"
 #include "exprs/binary_predicate.h"
@@ -50,9 +47,8 @@
 #include "testutil/column_test_helper.h"
 #include "testutil/exprs_test_helper.h"
 #include "types/type_descriptor.h"
-#include "types/variant.h"
+#include "types/variant_base.h"
 #include "util/thrift_util.h"
-#include "util/variant_encoder.h"
 
 namespace starrocks::parquet {
 

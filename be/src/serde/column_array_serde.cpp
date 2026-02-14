@@ -38,7 +38,7 @@
 #include "types/hll.h"
 #include "types/json_value.h"
 #include "types/percentile_value.h"
-#include "types/variant_value.h"
+#include "types/variant_row_value.h"
 #include "util/compression/compression_headers.h"
 
 namespace starrocks::serde {

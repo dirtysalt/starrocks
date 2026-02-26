@@ -74,10 +74,10 @@ namespace starrocks {
     ss << "not supported type " << type_to_string(TYPE); \
     throw RuntimeException(ss.str())
 
-#define THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FROMTYPE, TOTYPE, VALUE) \
-    std::stringstream ss;                                                 \
-    ss << "cast from " << type_to_string(FROMTYPE) << "(" << VALUE << ")" \
-       << " to " << type_to_string(TOTYPE) << " failed";                  \
+#define THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FROMTYPE, TOTYPE, VALUE)                                     \
+    std::stringstream ss;                                                                                     \
+    ss << "cast from " << type_to_string(FROMTYPE) << "(" << VALUE << ")" << " to " << type_to_string(TOTYPE) \
+       << " failed";                                                                                          \
     throw RuntimeException(ss.str())
 
 template <LogicalType FromType, LogicalType ToType, bool AllowThrowException = false>
@@ -200,18 +200,25 @@ static ColumnPtr cast_to_json_fn(ColumnPtr& column) {
             const auto* variant_data_column =
                     down_cast<const VariantColumn*>(ColumnHelper::get_data_column(column.get()));
             const size_t variant_row = column->is_constant() ? 0 : row;
-            VariantRowValue variant_buffer;
-            const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
-            if (variant == nullptr) {
-                overflow = true;
+            VariantRowRef row_ref;
+            if (!variant_data_column->try_get_row_ref(variant_row, &row_ref)) {
+                VariantRowValue variant_buffer;
+                const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
+                if (variant == nullptr) {
+                    overflow = true;
+                } else {
+                    row_ref = variant->as_ref();
+                }
             }
 
             if (!overflow) {
-                auto json_str = variant->to_json(cctz::local_time_zone());
-                if (!json_str.ok()) {
+                std::stringstream ss;
+                auto st = VariantUtil::variant_to_json(row_ref.get_metadata(), row_ref.get_value(), ss,
+                                                       cctz::local_time_zone());
+                if (!st.ok()) {
                     overflow = true;
                 } else {
-                    auto parsed = JsonValue::parse_json_or_string(json_str.value());
+                    auto parsed = JsonValue::parse_json_or_string(ss.str());
                     if (parsed.ok()) {
                         value = parsed.value();
                     } else {
@@ -278,18 +285,21 @@ static ColumnPtr cast_from_variant_fn(ColumnPtr& column) {
         }
 
         const size_t variant_row = column->is_constant() ? 0 : row;
-        VariantRowValue variant_buffer;
-        const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
-        if (variant == nullptr) {
-            builder.append_null();
-            continue;
+        VariantRowRef row_ref;
+        if (!variant_data_column->try_get_row_ref(variant_row, &row_ref)) {
+            VariantRowValue variant_buffer;
+            const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
+            if (variant == nullptr) {
+                builder.append_null();
+                continue;
+            }
+            row_ref = variant->as_ref();
         }
 
-        auto status =
-                VariantConverter::cast_to<ToType, AllowThrowException>(*variant, cctz::local_time_zone(), builder);
+        auto status = VariantConverter::cast_to<ToType, AllowThrowException>(row_ref, cctz::local_time_zone(), builder);
         if (!status.ok()) {
             if constexpr (AllowThrowException) {
-                THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FromType, ToType, variant->to_string());
+                THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FromType, ToType, row_ref.to_owned().to_string());
             }
             builder.append_null();
         }
@@ -474,12 +484,11 @@ DEFINE_UNARY_FN_WITH_IMPL(NumberCheckWithThrowException, value) {
     if (result) {
         std::stringstream ss;
         if constexpr (std::is_same_v<Type, __int128_t>) {
-            ss << int128_to_string(value) << " conflict with range of "
-               << "(" << int128_to_string((Type)std::numeric_limits<ResultType>::lowest()) << ", "
+            ss << int128_to_string(value) << " conflict with range of " << "("
+               << int128_to_string((Type)std::numeric_limits<ResultType>::lowest()) << ", "
                << int128_to_string((Type)std::numeric_limits<ResultType>::max()) << ")";
         } else {
-            ss << value << " conflict with range of "
-               << "(" << (Type)std::numeric_limits<ResultType>::lowest() << ", "
+            ss << value << " conflict with range of " << "(" << (Type)std::numeric_limits<ResultType>::lowest() << ", "
                << (Type)std::numeric_limits<ResultType>::max() << ")";
         }
         throw std::runtime_error(ss.str());
@@ -1281,8 +1290,8 @@ public:
             return Status::NotSupported("JIT casting does not support decimal");
         } else {
             ASSIGN_OR_RETURN(datum.value, IRHelper::cast_to_type(b, l, FromType, ToType));
-            if constexpr ((lt_is_integer<FromType> || lt_is_float<FromType>)&&(lt_is_integer<ToType> ||
-                                                                               lt_is_float<ToType>)) {
+            if constexpr ((lt_is_integer<FromType> || lt_is_float<FromType>) &&
+                          (lt_is_integer<ToType> || lt_is_float<ToType>)) {
                 typedef RunTimeCppType<FromType> FromCppType;
                 typedef RunTimeCppType<ToType> ToCppType;
                 if constexpr ((std::is_floating_point_v<ToCppType> || std::is_floating_point_v<FromCppType>)
@@ -1330,8 +1339,8 @@ public:
     std::string debug_string() const override {
         std::stringstream out;
         auto expr_debug_string = Expr::debug_string();
-        out << "VectorizedCastExpr ("
-            << "from=" << _children[0]->type().debug_string() << ", to expr=" << expr_debug_string << ")";
+        out << "VectorizedCastExpr (" << "from=" << _children[0]->type().debug_string()
+            << ", to expr=" << expr_debug_string << ")";
         return out.str();
     }
 };
@@ -1378,9 +1387,8 @@ DEFINE_BINARY_FUNCTION_WITH_IMPL(timeToDatetime, date, time) {
         std::string debug_string() const override {                                                             \
             std::stringstream out;                                                                              \
             auto expr_debug_string = Expr::debug_string();                                                      \
-            out << "VectorizedCastExpr ("                                                                       \
-                << "from=" << _children[0]->type().debug_string() << ", to=" << this->type().debug_string()     \
-                << ", expr=" << expr_debug_string << ")";                                                       \
+            out << "VectorizedCastExpr (" << "from=" << _children[0]->type().debug_string()                     \
+                << ", to=" << this->type().debug_string() << ", expr=" << expr_debug_string << ")";             \
             return out.str();                                                                                   \
         }                                                                                                       \
                                                                                                                 \

@@ -60,10 +60,14 @@ static VariantReadResult drill_down_column(const Column* col, size_t row, const 
         const auto* variant_col = down_cast<const VariantColumn*>(col);
         if (suffix_empty) {
             // No further navigation needed — return the whole sub-variant value.
+            VariantRowRef row_ref;
+            if (variant_col->try_get_row_ref(row, &row_ref)) {
+                return VariantReadResult{.state = VariantReadState::kValue, .value = row_ref.to_owned()};
+            }
             VariantRowValue buf;
             const VariantRowValue* val = variant_col->get_row_value(row, &buf);
             if (val == nullptr) return VariantReadResult{.state = VariantReadState::kMissing};
-            return VariantReadResult{.state = VariantReadState::kValue, .value = *val};
+            return VariantReadResult{.state = VariantReadState::kValue, .value = std::move(buf)};
         }
         // Reuse the same VariantPath with seg_offset — no sub-path allocation.
         // ARRAY layers above this point are also traversed without allocation.
@@ -93,9 +97,11 @@ static VariantReadResult drill_down_column(const Column* col, size_t row, const 
     if (!encoded.ok()) return VariantReadResult{.state = VariantReadState::kMissing};
     auto val = std::move(encoded).value();
     if (suffix_empty) return VariantReadResult{.state = VariantReadState::kValue, .value = std::move(val)};
-    auto field = VariantPath::seek(&val, suffix, seg_offset);
+    VariantRowRef val_ref = val.as_ref();
+    DCHECK(suffix != nullptr);
+    auto field = VariantPath::seek_view(val_ref, *suffix, seg_offset);
     if (!field.ok()) return VariantReadResult{.state = VariantReadState::kMissing};
-    return VariantReadResult{.state = VariantReadState::kValue, .value = std::move(field).value()};
+    return VariantReadResult{.state = VariantReadState::kValue, .value = std::move(field).value().to_owned()};
 }
 
 static bool get_binary_slice(const Column* column, size_t idx, Slice* slice) {
@@ -242,27 +248,40 @@ bool VariantPathReader::_seek_base(size_t row, VariantRowValue* out) {
         return false;
     }
 
-    VariantRowValue base_row(std::string_view(metadata_slice.data, metadata_slice.size),
-                             std::string_view(remain_slice.data, remain_slice.size));
-    auto field = VariantPath::seek(&base_row, _path, _seg_offset);
+    VariantRowRef base_row(std::string_view(metadata_slice.data, metadata_slice.size),
+                           std::string_view(remain_slice.data, remain_slice.size));
+    DCHECK(_path != nullptr);
+    auto field = VariantPath::seek_view(base_row, *_path, _seg_offset);
     if (!field.ok()) {
         return false;
     }
-    *out = std::move(field).value();
+    *out = std::move(field).value().to_owned();
     return true;
 }
 
 VariantReadResult VariantPathReader::_read_full(size_t row) {
+    VariantRowRef variant_ref;
+    if (_col->try_get_row_ref(row, &variant_ref)) {
+        DCHECK(_path != nullptr);
+        auto field = VariantPath::seek_view(variant_ref, *_path, _seg_offset);
+        if (!field.ok()) {
+            return VariantReadResult{.state = VariantReadState::kMissing};
+        }
+        return VariantReadResult{.state = VariantReadState::kValue, .value = std::move(field).value().to_owned()};
+    }
+
     VariantRowValue variant_buffer;
     const VariantRowValue* variant = _col->get_row_value(row, &variant_buffer);
     if (variant == nullptr) {
         return VariantReadResult{.state = VariantReadState::kMissing};
     }
-    auto field = VariantPath::seek(variant, _path, _seg_offset);
+    variant_ref = variant->as_ref();
+    DCHECK(_path != nullptr);
+    auto field = VariantPath::seek_view(variant_ref, *_path, _seg_offset);
     if (!field.ok()) {
         return VariantReadResult{.state = VariantReadState::kMissing};
     }
-    return VariantReadResult{.state = VariantReadState::kValue, .value = std::move(field).value()};
+    return VariantReadResult{.state = VariantReadState::kValue, .value = std::move(field).value().to_owned()};
 }
 
 VariantReadResult VariantPathReader::read_row(size_t row) {

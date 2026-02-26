@@ -284,13 +284,11 @@ std::optional<std::string> VariantPath::to_shredded_path() const {
     return result;
 }
 
-StatusOr<VariantRowValue> VariantPath::seek(const VariantRowValue* variant, const VariantPath* variant_path,
-                                            size_t seg_offset) {
-    if (variant == nullptr || variant_path == nullptr) {
+static StatusOr<VariantValue> seek_variant_value(const VariantMetadata& metadata, VariantValue current,
+                                                 const VariantPath* variant_path, size_t seg_offset) {
+    if (variant_path == nullptr) {
         return Status::InvalidArgument("Variant value and path must not be null");
     }
-    const VariantMetadata& metadata = variant->get_metadata();
-    VariantValue current{variant->get_value().raw()};
     for (size_t i = seg_offset; i < variant_path->segments.size(); ++i) {
         const auto& seg = variant_path->segments[i];
         if (seg.is_object()) {
@@ -300,7 +298,14 @@ StatusOr<VariantRowValue> VariantPath::seek(const VariantRowValue* variant, cons
         }
         if (current.is_null()) break;
     }
-    return VariantRowValue::from_variant(metadata, current);
+    return current;
+}
+
+StatusOr<VariantRowRef> VariantPath::seek_view(const VariantRowRef& value, const VariantPath& variant_path,
+                                               size_t seg_offset) {
+    ASSIGN_OR_RETURN(auto current,
+                     seek_variant_value(value.get_metadata(), value.get_value(), &variant_path, seg_offset));
+    return VariantRowRef::from_variant(value.get_metadata(), current);
 }
 
 } // namespace starrocks

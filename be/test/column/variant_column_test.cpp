@@ -1137,4 +1137,41 @@ PARALLEL_TEST(VariantColumnTest, test_base_shredded_const_typed_column_materiali
     ASSERT_EQ(R"({"a":42})", j1.value());
 }
 
+PARALLEL_TEST(VariantColumnTest, test_try_get_row_ref_base_payload_only) {
+    auto col = VariantColumn::create();
+    VariantRowValue base = create_variant_row_from_json_text(R"({"k":"v"})");
+    col->append(&base);
+
+    VariantRowRef row_ref;
+    ASSERT_TRUE(col->try_get_row_ref(0, &row_ref));
+    EXPECT_EQ(base.get_metadata(), row_ref.get_metadata());
+    EXPECT_EQ(base.get_value(), row_ref.get_value());
+}
+
+PARALLEL_TEST(VariantColumnTest, test_try_get_row_ref_returns_false_when_typed_overlay_exists) {
+    auto col = VariantColumn::create();
+    VariantRowValue base = create_variant_row_from_json_text(R"({"x":1})");
+    std::string metadata(base.get_metadata().raw());
+    std::string value(base.get_value().raw());
+
+    MutableColumns typed;
+    typed.emplace_back(build_nullable_int64_column({7}, {0}));
+    auto metadata_col = BinaryColumn::create();
+    auto remain_col = BinaryColumn::create();
+    metadata_col->append(metadata);
+    remain_col->append(value);
+    col->set_shredded_columns({"x"}, {TypeDescriptor(TYPE_BIGINT)}, std::move(typed), std::move(metadata_col),
+                              std::move(remain_col));
+
+    VariantRowRef row_ref;
+    ASSERT_FALSE(col->try_get_row_ref(0, &row_ref));
+
+    VariantRowValue materialized;
+    const VariantRowValue* value_ptr = col->get_row_value(0, &materialized);
+    ASSERT_NE(nullptr, value_ptr);
+    auto json = value_ptr->to_json();
+    ASSERT_TRUE(json.ok());
+    ASSERT_EQ(R"({"x":7})", json.value());
+}
+
 } // namespace starrocks

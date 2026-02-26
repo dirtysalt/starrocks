@@ -87,7 +87,9 @@ struct VariantPath {
     std::optional<std::string> to_shredded_path() const;
 
     // Seek into a variant using the parsed segments, starting at seg_offset.
-    static StatusOr<VariantRowValue> seek(const VariantRowValue* value, const VariantPath* path, size_t seg_offset = 0);
+    // Returns a non-owning row ref. Call to_owned() when retained storage is required.
+    static StatusOr<VariantRowRef> seek_view(const VariantRowRef& value, const VariantPath& path,
+                                             size_t seg_offset = 0);
 };
 
 // Parser for variant path expressions (JSONPath subset: "$", "$.a.b", "$[0]", "$['key']").

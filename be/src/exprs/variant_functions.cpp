@@ -97,7 +97,7 @@ static void append_variant_field_to_result(FunctionContext* context, VariantRowV
     } else {
         const RuntimeState* state = context->state();
         cctz::time_zone zone = (state == nullptr) ? cctz::local_time_zone() : context->state()->timezone_obj();
-        Status casted = VariantConverter::cast_to<ResultType, true>(field, zone, *result);
+        Status casted = VariantConverter::cast_to<ResultType, true>(field.as_ref(), zone, *result);
         if (!casted.ok()) {
             result->append_null();
         }
@@ -181,7 +181,7 @@ static ColumnPtr _build_typed_cast_result(FunctionContext* context, const Column
             result.append_null();
             continue;
         }
-        Status cast_status = VariantConverter::cast_to<ResultType, true>(encoded.value, zone, result);
+        Status cast_status = VariantConverter::cast_to<ResultType, true>(encoded.value.as_ref(), zone, result);
         if (!cast_status.ok()) {
             result.append_null();
         }
@@ -302,6 +302,12 @@ StatusOr<ColumnPtr> VariantFunctions::variant_typeof(FunctionContext* context, c
         }
 
         // All typed columns null or no typed columns: read type from remain.
+        VariantRowRef row_ref;
+        if (variant_data_column->try_get_row_ref(variant_row, &row_ref)) {
+            result.append(VariantUtil::variant_type_to_string(row_ref.get_value().type()));
+            continue;
+        }
+
         VariantRowValue variant_buffer;
         const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
         if (variant == nullptr) {

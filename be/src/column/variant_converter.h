@@ -24,6 +24,7 @@
 #include "types/time_types.h"
 #include "types/timestamp_value.h"
 #include "types/variant.h"
+#include "types/variant_value.h"
 
 namespace starrocks {
 
@@ -46,22 +47,20 @@ class VariantConverter {
 public:
     VariantConverter() = delete;
 
-    static Status cast_to_bool(const VariantRowValue& row, ColumnBuilder<TYPE_BOOLEAN>& result);
+    static Status cast_to_bool(const VariantRowRef& row, ColumnBuilder<TYPE_BOOLEAN>& result);
 
-    static Status cast_to_string(const VariantRowValue& row, const cctz::time_zone& zone,
+    static Status cast_to_string(const VariantRowRef& row, const cctz::time_zone& zone,
                                  ColumnBuilder<TYPE_VARCHAR>& result);
 
-    static Status cast_to_date(const VariantRowValue& row, const cctz::time_zone& zone,
-                               ColumnBuilder<TYPE_DATE>& result);
+    static Status cast_to_date(const VariantRowRef& row, const cctz::time_zone& zone, ColumnBuilder<TYPE_DATE>& result);
 
-    static Status cast_to_time(const VariantRowValue& row, const cctz::time_zone& zone,
-                               ColumnBuilder<TYPE_TIME>& result);
+    static Status cast_to_time(const VariantRowRef& row, const cctz::time_zone& zone, ColumnBuilder<TYPE_TIME>& result);
 
-    static Status cast_to_datetime(const VariantRowValue& row, const cctz::time_zone& zone,
+    static Status cast_to_datetime(const VariantRowRef& row, const cctz::time_zone& zone,
                                    ColumnBuilder<TYPE_DATETIME>& result);
 
     template <LogicalType ResultType>
-    static Status cast_to_arithmetic(const VariantRowValue& row, ColumnBuilder<ResultType>& result) {
+    static Status cast_to_arithmetic(const VariantRowRef& row, ColumnBuilder<ResultType>& result) {
         const VariantValue& variant = row.get_value();
         switch (const VariantType type = variant.type()) {
         case VariantType::NULL_TYPE: {
@@ -88,7 +87,7 @@ public:
     // If AllowThrowException is true, returns an error Status on cast failure.
     // If AllowThrowException is false, appends null on cast failure and returns OK.
     template <LogicalType ResultType, bool AllowThrowException>
-    static Status cast_to(const VariantRowValue& row, const cctz::time_zone& zone, ColumnBuilder<ResultType>& result) {
+    static Status cast_to(const VariantRowRef& row, const cctz::time_zone& zone, ColumnBuilder<ResultType>& result) {
         const VariantType variant_type = row.get_value().type();
         // Supported types: arithmetic, string, variant
         // Some casting require more information like target type within ARRAY/MAP/STRUCT which is not available here:
@@ -112,7 +111,7 @@ public:
         }
 
         if constexpr (ResultType == TYPE_VARIANT) {
-            result.append(VariantRowValue::from_variant(row.get_metadata(), row.get_value()));
+            result.append(row.to_owned());
             return Status::OK();
         }
 

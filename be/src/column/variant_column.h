@@ -115,6 +115,7 @@ public:
     // - typed columns exist
     // - metadata/remain are absent
     bool is_typed_only_variant() const;
+    bool try_get_row_ref(size_t idx, VariantRowRef* out) const;
     const VariantRowValue* get_row_value(size_t idx, VariantRowValue* output) const;
     bool try_materialize_row(size_t idx, VariantRowValue* output) const;
 

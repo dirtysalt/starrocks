@@ -78,7 +78,7 @@ StatusOr<VariantColumn::EncodedVariantResult> VariantColumn::encode_typed_row_as
         }
         return EncodedVariantResult{
                 .state = EncodedVariantState::kValue,
-                .value = *variant,
+                .value = std::move(row_buffer),
         };
     }
 
@@ -581,6 +581,22 @@ const VariantRowValue* VariantColumn::get_row_value(size_t idx, VariantRowValue*
     return output;
 }
 
+static bool has_non_null_typed_overlay(const VariantColumn* column, size_t row) {
+    if (column == nullptr) {
+        return false;
+    }
+    for (const auto& typed_col : column->typed_columns()) {
+        if (typed_col == nullptr) {
+            continue;
+        }
+        const size_t typed_row = typed_col->is_constant() ? 0 : row;
+        if (!typed_col->is_null(typed_row)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool get_binary_slice(const Column* column, size_t idx, Slice* slice) {
     if (column == nullptr || slice == nullptr) {
         return false;
@@ -615,9 +631,42 @@ static bool try_materialize_from_typed_only_overlays(const VariantColumn* column
     return rebuild_row_with_optional_base(nullptr, std::move(overlays), output);
 }
 
+bool VariantColumn::try_get_row_ref(size_t idx, VariantRowRef* out) const {
+    if (out == nullptr) {
+        return false;
+    }
+    if (!has_metadata_column() || !has_remain_value()) {
+        return false;
+    }
+
+    Slice metadata_slice;
+    Slice remain_slice;
+    bool has_metadata = get_binary_slice(_metadata_column.get(), idx, &metadata_slice);
+    bool has_remain = get_binary_slice(_remain_value_column.get(), idx, &remain_slice);
+    if (!has_metadata || !has_remain) {
+        return false;
+    }
+    if (metadata_slice.size == 0 || remain_slice.size == 0) {
+        return false;
+    }
+
+    if (has_non_null_typed_overlay(this, idx)) {
+        return false;
+    }
+    *out = VariantRowRef(std::string_view(metadata_slice.data, metadata_slice.size),
+                         std::string_view(remain_slice.data, remain_slice.size));
+    return true;
+}
+
 bool VariantColumn::try_materialize_row(size_t idx, VariantRowValue* output) const {
     if (output == nullptr) {
         return false;
+    }
+
+    VariantRowRef row_ref;
+    if (try_get_row_ref(idx, &row_ref)) {
+        *output = row_ref.to_owned();
+        return true;
     }
 
     if (has_metadata_column() && has_remain_value()) {

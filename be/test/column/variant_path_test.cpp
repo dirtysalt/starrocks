@@ -17,6 +17,8 @@
 #include <gtest/gtest-param-test.h>
 #include <gtest/gtest.h>
 
+#include "column/variant_encoder.h"
+
 namespace starrocks {
 
 struct PathTestCase {
@@ -325,6 +327,38 @@ TEST_F(VariantPathTest, ParseShreddedPathSingleKey) {
     ASSERT_TRUE(result.ok());
     ASSERT_EQ(result->segments.size(), 1u);
     EXPECT_EQ(result->segments[0].get_key(), "name");
+}
+
+TEST_F(VariantPathTest, SeekViewReturnsExpectedNestedValue) {
+    auto encoded = VariantEncoder::encode_json_text_to_variant(R"({"a":{"b":[10,20]},"x":1})");
+    ASSERT_TRUE(encoded.ok());
+    VariantRowValue row = std::move(encoded).value();
+
+    auto path = VariantPathParser::parse(std::string("$.a.b[1]"));
+    ASSERT_TRUE(path.ok());
+
+    VariantRowRef row_ref = row.as_ref();
+    auto view_seek = VariantPath::seek_view(row_ref, path.value());
+    ASSERT_TRUE(view_seek.ok());
+    auto json = view_seek->to_owned().to_json();
+    ASSERT_TRUE(json.ok());
+    EXPECT_EQ("20", json.value());
+}
+
+TEST_F(VariantPathTest, SeekViewRootReturnsWholeValue) {
+    auto encoded = VariantEncoder::encode_json_text_to_variant(R"({"k":"v","n":123})");
+    ASSERT_TRUE(encoded.ok());
+    VariantRowValue row = std::move(encoded).value();
+
+    auto root_path = VariantPathParser::parse(std::string("$"));
+    ASSERT_TRUE(root_path.ok());
+
+    VariantRowRef row_ref = row.as_ref();
+    auto view_seek = VariantPath::seek_view(row_ref, root_path.value());
+    ASSERT_TRUE(view_seek.ok());
+    auto json = view_seek->to_owned().to_json();
+    ASSERT_TRUE(json.ok());
+    EXPECT_EQ(R"({"k":"v","n":123})", json.value());
 }
 
 } // namespace starrocks

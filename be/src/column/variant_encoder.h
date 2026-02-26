@@ -31,6 +31,7 @@
 #include "types/datum.h"
 #include "types/json_value.h"
 #include "types/type_descriptor.h"
+#include "types/variant.h"
 
 namespace starrocks {
 
@@ -49,6 +50,29 @@ namespace starrocks {
 //   so metadata must be built before encoding object/map/struct values.
 class VariantEncoder {
 public:
+    inline static uint8_t minimal_uint_size(uint32_t value) {
+        if (value <= 0xFF) return 1;
+        if (value <= 0xFFFF) return 2;
+        if (value <= 0xFFFFFF) return 3;
+        return 4;
+    }
+
+    inline static void append_uint_le(std::string* out, uint32_t value, uint8_t size) {
+        for (uint8_t i = 0; i < size; ++i) {
+            out->push_back(static_cast<char>((value >> (i * 8)) & 0xFF));
+        }
+    }
+
+    inline static void append_null_value(std::string* out) {
+        out->append(VariantValue::kEmptyValue.data(), VariantValue::kEmptyValue.size());
+    }
+
+    static void append_array_container(std::string* out, const std::vector<uint32_t>& end_offsets,
+                                       std::string_view payload);
+
+    static void append_object_container(std::string* out, const std::vector<uint32_t>& field_ids,
+                                        const std::vector<uint32_t>& end_offsets, std::string_view payload);
+
     // Encode an entire column of the given type into a VariantColumn builder.
     //
     // Why: CAST(col AS VARIANT) and similar bulk-conversion operators need to process

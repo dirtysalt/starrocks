@@ -16,12 +16,15 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "base/testutil/parallel_test.h"
 #include "column/column_helper.h"
 #include "column/fixed_length_column.h"
 #include "column/variant_column.h"
 #include "gutil/casts.h"
 #include "types/type_descriptor.h"
+#include "types/variant.h"
 
 namespace starrocks {
 
@@ -74,6 +77,34 @@ PARALLEL_TEST(VariantEncoderTest, encode_int_column) {
     ASSERT_TRUE(json1.ok());
     ASSERT_EQ("7", json0.value());
     ASSERT_EQ("42", json1.value());
+}
+
+PARALLEL_TEST(VariantEncoderTest, encode_deep_nested_json_roundtrip) {
+    auto encoded = VariantEncoder::encode_json_text_to_variant(R"({"a":{"b":[{"c":{"d":[1,2,{"e":"x"}]}}]}})");
+    ASSERT_TRUE(encoded.ok());
+    auto json = encoded->to_json();
+    ASSERT_TRUE(json.ok());
+    ASSERT_EQ(R"({"a":{"b":[{"c":{"d":[1,2,{"e":"x"}]}}]}})", json.value());
+}
+
+PARALLEL_TEST(VariantEncoderTest, encode_large_array_offsets) {
+    std::string array_text = "[";
+    for (int i = 0; i < 300; ++i) {
+        if (i > 0) {
+            array_text.push_back(',');
+        }
+        array_text.append(std::to_string(i));
+    }
+    array_text.push_back(']');
+
+    auto encoded = VariantEncoder::encode_json_text_to_variant(array_text);
+    ASSERT_TRUE(encoded.ok());
+    const VariantValue& value = encoded->get_value();
+    ASSERT_EQ(VariantType::ARRAY, value.type());
+    auto info = value.get_array_info();
+    ASSERT_TRUE(info.ok());
+    ASSERT_EQ(300, info->num_elements);
+    ASSERT_GE(info->offset_size, 2);
 }
 
 } // namespace starrocks

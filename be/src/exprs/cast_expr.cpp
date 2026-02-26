@@ -74,10 +74,10 @@ namespace starrocks {
     ss << "not supported type " << type_to_string(TYPE); \
     throw RuntimeException(ss.str())
 
-#define THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FROMTYPE, TOTYPE, VALUE)                                     \
-    std::stringstream ss;                                                                                     \
-    ss << "cast from " << type_to_string(FROMTYPE) << "(" << VALUE << ")" << " to " << type_to_string(TOTYPE) \
-       << " failed";                                                                                          \
+#define THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FROMTYPE, TOTYPE, VALUE) \
+    std::stringstream ss;                                                 \
+    ss << "cast from " << type_to_string(FROMTYPE) << "(" << VALUE << ")" \
+       << " to " << type_to_string(TOTYPE) << " failed";                  \
     throw RuntimeException(ss.str())
 
 template <LogicalType FromType, LogicalType ToType, bool AllowThrowException = false>
@@ -484,11 +484,12 @@ DEFINE_UNARY_FN_WITH_IMPL(NumberCheckWithThrowException, value) {
     if (result) {
         std::stringstream ss;
         if constexpr (std::is_same_v<Type, __int128_t>) {
-            ss << int128_to_string(value) << " conflict with range of " << "("
-               << int128_to_string((Type)std::numeric_limits<ResultType>::lowest()) << ", "
+            ss << int128_to_string(value) << " conflict with range of "
+               << "(" << int128_to_string((Type)std::numeric_limits<ResultType>::lowest()) << ", "
                << int128_to_string((Type)std::numeric_limits<ResultType>::max()) << ")";
         } else {
-            ss << value << " conflict with range of " << "(" << (Type)std::numeric_limits<ResultType>::lowest() << ", "
+            ss << value << " conflict with range of "
+               << "(" << (Type)std::numeric_limits<ResultType>::lowest() << ", "
                << (Type)std::numeric_limits<ResultType>::max() << ")";
         }
         throw std::runtime_error(ss.str());
@@ -1290,8 +1291,8 @@ public:
             return Status::NotSupported("JIT casting does not support decimal");
         } else {
             ASSIGN_OR_RETURN(datum.value, IRHelper::cast_to_type(b, l, FromType, ToType));
-            if constexpr ((lt_is_integer<FromType> || lt_is_float<FromType>) &&
-                          (lt_is_integer<ToType> || lt_is_float<ToType>)) {
+            if constexpr ((lt_is_integer<FromType> || lt_is_float<FromType>)&&(lt_is_integer<ToType> ||
+                                                                               lt_is_float<ToType>)) {
                 typedef RunTimeCppType<FromType> FromCppType;
                 typedef RunTimeCppType<ToType> ToCppType;
                 if constexpr ((std::is_floating_point_v<ToCppType> || std::is_floating_point_v<FromCppType>)
@@ -1339,8 +1340,8 @@ public:
     std::string debug_string() const override {
         std::stringstream out;
         auto expr_debug_string = Expr::debug_string();
-        out << "VectorizedCastExpr (" << "from=" << _children[0]->type().debug_string()
-            << ", to expr=" << expr_debug_string << ")";
+        out << "VectorizedCastExpr ("
+            << "from=" << _children[0]->type().debug_string() << ", to expr=" << expr_debug_string << ")";
         return out.str();
     }
 };
@@ -1387,8 +1388,9 @@ DEFINE_BINARY_FUNCTION_WITH_IMPL(timeToDatetime, date, time) {
         std::string debug_string() const override {                                                             \
             std::stringstream out;                                                                              \
             auto expr_debug_string = Expr::debug_string();                                                      \
-            out << "VectorizedCastExpr (" << "from=" << _children[0]->type().debug_string()                     \
-                << ", to=" << this->type().debug_string() << ", expr=" << expr_debug_string << ")";             \
+            out << "VectorizedCastExpr ("                                                                       \
+                << "from=" << _children[0]->type().debug_string() << ", to=" << this->type().debug_string()     \
+                << ", expr=" << expr_debug_string << ")";                                                       \
             return out.str();                                                                                   \
         }                                                                                                       \
                                                                                                                 \

@@ -40,11 +40,6 @@
 
 namespace starrocks {
 
-// ---------------------------------------------------------------------------
-// Shared low-level encoding utilities used by both VariantEncoder and VariantBuilder.
-// Small/trivial functions are defined inline here; larger ones are in variant_encoder.cpp.
-// ---------------------------------------------------------------------------
-
 constexpr uint8_t kVariantMetadataVersion = 1;
 constexpr uint8_t kVariantMetadataSortedMask = 0b10000;
 constexpr uint8_t kVariantMetadataOffsetSizeShift = 6;
@@ -58,20 +53,60 @@ inline void append_little_endian(std::string* out, T value) {
     out->append(reinterpret_cast<const char*>(&le_value), sizeof(T));
 }
 
-inline void append_uint_le(std::string* out, uint32_t value, uint8_t size) {
-    uint32_t le_value = arrow::bit_util::ToLittleEndian(value);
-    out->append(reinterpret_cast<const char*>(&le_value), size);
-}
-
-inline uint8_t minimal_uint_size(uint32_t value) {
-    if (value <= 0xFF) return 1;
-    if (value <= 0xFFFF) return 2;
-    if (value <= 0xFFFFFF) return 3;
-    return 4;
-}
-
 inline std::string encode_null_value() {
     return std::string(VariantValue::kEmptyValue);
+}
+
+void VariantEncoder::append_array_container(std::string* out, const std::vector<uint32_t>& end_offsets,
+                                            std::string_view payload) {
+    const uint32_t num_elements = static_cast<uint32_t>(end_offsets.size());
+    const uint8_t is_large = num_elements > 255 ? 1 : 0;
+    const uint8_t num_elements_size = is_large ? 4 : 1;
+    const uint8_t offset_size = VariantEncoder::minimal_uint_size(static_cast<uint32_t>(payload.size()));
+    const uint8_t vheader = static_cast<uint8_t>((offset_size - 1) | (is_large << 2));
+    const char header = static_cast<char>((vheader << VariantValue::kValueHeaderBitShift) |
+                                          static_cast<uint8_t>(VariantValue::BasicType::ARRAY));
+
+    out->reserve(out->size() + 1 + num_elements_size + (num_elements + 1) * offset_size + payload.size());
+    out->push_back(header);
+    VariantEncoder::append_uint_le(out, num_elements, num_elements_size);
+    VariantEncoder::append_uint_le(out, 0, offset_size);
+    for (uint32_t end_offset : end_offsets) {
+        VariantEncoder::append_uint_le(out, end_offset, offset_size);
+    }
+    out->append(payload.data(), payload.size());
+}
+
+void VariantEncoder::append_object_container(std::string* out, const std::vector<uint32_t>& field_ids,
+                                             const std::vector<uint32_t>& end_offsets, std::string_view payload) {
+    DCHECK_EQ(field_ids.size(), end_offsets.size());
+    const uint32_t num_elements = static_cast<uint32_t>(field_ids.size());
+    const uint8_t is_large = num_elements > 255 ? 1 : 0;
+    const uint8_t num_elements_size = is_large ? 4 : 1;
+
+    uint32_t max_field_id = 0;
+    for (uint32_t field_id : field_ids) {
+        max_field_id = std::max(max_field_id, field_id);
+    }
+    const uint8_t field_id_size = VariantEncoder::minimal_uint_size(max_field_id);
+    const uint8_t field_offset_size = VariantEncoder::minimal_uint_size(static_cast<uint32_t>(payload.size()));
+    const uint8_t vheader =
+            static_cast<uint8_t>((field_offset_size - 1) | ((field_id_size - 1) << 2) | (is_large << 4));
+    const char header = static_cast<char>((vheader << VariantValue::kValueHeaderBitShift) |
+                                          static_cast<uint8_t>(VariantValue::BasicType::OBJECT));
+
+    out->reserve(out->size() + 1 + num_elements_size + num_elements * field_id_size +
+                 (num_elements + 1) * field_offset_size + payload.size());
+    out->push_back(header);
+    VariantEncoder::append_uint_le(out, num_elements, num_elements_size);
+    for (uint32_t field_id : field_ids) {
+        VariantEncoder::append_uint_le(out, field_id, field_id_size);
+    }
+    VariantEncoder::append_uint_le(out, 0, field_offset_size);
+    for (uint32_t end_offset : end_offsets) {
+        VariantEncoder::append_uint_le(out, end_offset, field_offset_size);
+    }
+    out->append(payload.data(), payload.size());
 }
 
 static std::string key_datum_to_string(TypeInfo* type_info, const Datum& datum) {
@@ -173,7 +208,7 @@ static std::string encode_string_value(const Slice& value) {
         uint8_t header = static_cast<uint8_t>((static_cast<uint8_t>(VariantType::STRING) << 2) |
                                               static_cast<uint8_t>(VariantValue::BasicType::PRIMITIVE));
         out.push_back(static_cast<char>(header));
-        append_uint_le(&out, static_cast<uint32_t>(len), sizeof(uint32_t));
+        VariantEncoder::append_uint_le(&out, static_cast<uint32_t>(len), sizeof(uint32_t));
         out.append(value.data, len);
     }
     return out;
@@ -254,73 +289,31 @@ std::string encode_string_or_binary(VariantType type, std::string_view value) {
 }
 
 std::string VariantEncoder::encode_object_from_fields(const std::map<uint32_t, std::string>& fields) {
-    const uint32_t num_elements = static_cast<uint32_t>(fields.size());
-    uint8_t is_large = num_elements > 255 ? 1 : 0;
-    const uint8_t num_elements_size = is_large ? 4 : 1;
-
-    uint32_t max_field_id = 0;
-    uint32_t total_data_size = 0;
-    for (const auto& [field_id, value] : fields) {
-        max_field_id = std::max(max_field_id, field_id);
-        total_data_size += static_cast<uint32_t>(value.size());
-    }
-
-    const uint8_t field_id_size = minimal_uint_size(max_field_id);
-    const uint8_t field_offset_size = minimal_uint_size(total_data_size);
-    uint8_t vheader = static_cast<uint8_t>((field_offset_size - 1) | ((field_id_size - 1) << 2) | (is_large << 4));
-    char header = static_cast<char>((vheader << VariantValue::kValueHeaderBitShift) |
-                                    static_cast<uint8_t>(VariantValue::BasicType::OBJECT));
-
     std::string out;
-    out.reserve(1 + num_elements_size + num_elements * field_id_size + (num_elements + 1) * field_offset_size +
-                total_data_size);
-    out.push_back(header);
-    append_uint_le(&out, num_elements, num_elements_size);
+    std::string payload;
+    std::vector<uint32_t> field_ids;
+    std::vector<uint32_t> end_offsets;
+    field_ids.reserve(fields.size());
+    end_offsets.reserve(fields.size());
     for (const auto& [field_id, value] : fields) {
-        append_uint_le(&out, field_id, field_id_size);
+        payload.append(value.data(), value.size());
+        field_ids.emplace_back(field_id);
+        end_offsets.emplace_back(static_cast<uint32_t>(payload.size()));
     }
-
-    uint32_t offset = 0;
-    append_uint_le(&out, offset, field_offset_size);
-    for (const auto& [field_id, value] : fields) {
-        offset += static_cast<uint32_t>(value.size());
-        append_uint_le(&out, offset, field_offset_size);
-    }
-    for (const auto& [field_id, value] : fields) {
-        out.append(value.data(), value.size());
-    }
+    VariantEncoder::append_object_container(&out, field_ids, end_offsets, payload);
     return out;
 }
 
 std::string VariantEncoder::encode_array_from_elements(const std::vector<std::string>& elements) {
-    const uint32_t num_elements = static_cast<uint32_t>(elements.size());
-    uint8_t is_large = num_elements > 255 ? 1 : 0;
-    const uint8_t num_elements_size = is_large ? 4 : 1;
-
-    uint32_t total_data_size = 0;
-    for (const auto& element : elements) {
-        total_data_size += static_cast<uint32_t>(element.size());
-    }
-
-    const uint8_t offset_size = minimal_uint_size(total_data_size);
-    uint8_t vheader = static_cast<uint8_t>((offset_size - 1) | (is_large << 2));
-    char header = static_cast<char>((vheader << VariantValue::kValueHeaderBitShift) |
-                                    static_cast<uint8_t>(VariantValue::BasicType::ARRAY));
-
     std::string out;
-    out.reserve(1 + num_elements_size + (num_elements + 1) * offset_size + total_data_size);
-    out.push_back(header);
-    append_uint_le(&out, num_elements, num_elements_size);
-
-    uint32_t offset = 0;
-    append_uint_le(&out, offset, offset_size);
+    std::string payload;
+    std::vector<uint32_t> end_offsets;
+    end_offsets.reserve(elements.size());
     for (const auto& element : elements) {
-        offset += static_cast<uint32_t>(element.size());
-        append_uint_le(&out, offset, offset_size);
+        payload.append(element.data(), element.size());
+        end_offsets.emplace_back(static_cast<uint32_t>(payload.size()));
     }
-    for (const auto& element : elements) {
-        out.append(element.data(), element.size());
-    }
+    VariantEncoder::append_array_container(&out, end_offsets, payload);
     return out;
 }
 
@@ -347,7 +340,7 @@ StatusOr<std::string> VariantEncoder::build_variant_metadata(const std::unordere
 
     const uint32_t dict_size = static_cast<uint32_t>(sorted_keys.size());
     const uint32_t max_value = std::max(dict_size, total_string_size);
-    const uint8_t offset_size = minimal_uint_size(max_value);
+    const uint8_t offset_size = VariantEncoder::minimal_uint_size(max_value);
 
     uint8_t header = kVariantMetadataVersion;
     header |= kVariantMetadataSortedMask;
@@ -356,13 +349,13 @@ StatusOr<std::string> VariantEncoder::build_variant_metadata(const std::unordere
     std::string metadata;
     metadata.reserve(1 + offset_size * (dict_size + 2) + total_string_size);
     metadata.push_back(static_cast<char>(header));
-    append_uint_le(&metadata, dict_size, offset_size);
+    VariantEncoder::append_uint_le(&metadata, dict_size, offset_size);
 
     uint32_t offset = 0;
-    append_uint_le(&metadata, offset, offset_size);
+    VariantEncoder::append_uint_le(&metadata, offset, offset_size);
     for (const auto& key : sorted_keys) {
         offset += static_cast<uint32_t>(key.size());
-        append_uint_le(&metadata, offset, offset_size);
+        VariantEncoder::append_uint_le(&metadata, offset, offset_size);
     }
     for (const auto& key : sorted_keys) {
         metadata.append(key.data(), key.size());
@@ -400,53 +393,102 @@ Status collect_object_keys(const vpack::Slice& slice, std::unordered_set<std::st
     return Status::OK();
 }
 
-StatusOr<std::string> encode_json_to_variant_value(const vpack::Slice& slice,
-                                                   const std::unordered_map<std::string, uint32_t>& key_to_id) {
+template <typename T>
+inline void append_primitive_number(std::string* out, VariantType type, T value) {
+    char header = static_cast<char>((static_cast<uint8_t>(type) << VariantValue::kValueHeaderBitShift) |
+                                    static_cast<uint8_t>(VariantValue::BasicType::PRIMITIVE));
+    out->push_back(header);
+    append_little_endian(out, value);
+}
+
+inline void append_boolean_value(std::string* out, bool value) {
+    const auto type = value ? VariantType::BOOLEAN_TRUE : VariantType::BOOLEAN_FALSE;
+    char header = static_cast<char>((static_cast<uint8_t>(type) << VariantValue::kValueHeaderBitShift) |
+                                    static_cast<uint8_t>(VariantValue::BasicType::PRIMITIVE));
+    out->push_back(header);
+}
+
+inline void append_string_or_binary_value(std::string* out, VariantType type, std::string_view value) {
+    char header = static_cast<char>((static_cast<uint8_t>(type) << VariantValue::kValueHeaderBitShift) |
+                                    static_cast<uint8_t>(VariantValue::BasicType::PRIMITIVE));
+    out->push_back(header);
+    append_little_endian<uint32_t>(out, static_cast<uint32_t>(value.size()));
+    out->append(value.data(), value.size());
+}
+
+inline void append_string_value(std::string* out, const Slice& value) {
+    const size_t len = value.size;
+    if (len <= 63) {
+        uint8_t header = static_cast<uint8_t>((len << VariantValue::kValueHeaderBitShift) |
+                                              static_cast<uint8_t>(VariantValue::BasicType::SHORT_STRING));
+        out->push_back(static_cast<char>(header));
+        out->append(value.data, len);
+    } else {
+        uint8_t header = static_cast<uint8_t>((static_cast<uint8_t>(VariantType::STRING) << 2) |
+                                              static_cast<uint8_t>(VariantValue::BasicType::PRIMITIVE));
+        out->push_back(static_cast<char>(header));
+        VariantEncoder::append_uint_le(out, static_cast<uint32_t>(len), sizeof(uint32_t));
+        out->append(value.data, len);
+    }
+}
+
+Status encode_json_to_variant_value(const vpack::Slice& slice,
+                                    const std::unordered_map<std::string, uint32_t>& key_to_id, std::string* out) {
     try {
         if (slice.isNone() || slice.isNull()) {
-            return encode_null_value();
+            VariantEncoder::append_null_value(out);
+            return Status::OK();
         }
         if (slice.isBool()) {
-            return encode_boolean(slice.getBool());
+            append_boolean_value(out, slice.getBool());
+            return Status::OK();
         }
         if (slice.isInt() || slice.isSmallInt()) {
             int64_t v = slice.getIntUnchecked();
             if (v >= std::numeric_limits<int8_t>::min() && v <= std::numeric_limits<int8_t>::max())
-                return encode_primitive_number<int8_t>(VariantType::INT8, static_cast<int8_t>(v));
-            if (v >= std::numeric_limits<int16_t>::min() && v <= std::numeric_limits<int16_t>::max())
-                return encode_primitive_number<int16_t>(VariantType::INT16, static_cast<int16_t>(v));
-            if (v >= std::numeric_limits<int32_t>::min() && v <= std::numeric_limits<int32_t>::max())
-                return encode_primitive_number<int32_t>(VariantType::INT32, static_cast<int32_t>(v));
-            return encode_primitive_number<int64_t>(VariantType::INT64, v);
+                append_primitive_number<int8_t>(out, VariantType::INT8, static_cast<int8_t>(v));
+            else if (v >= std::numeric_limits<int16_t>::min() && v <= std::numeric_limits<int16_t>::max())
+                append_primitive_number<int16_t>(out, VariantType::INT16, static_cast<int16_t>(v));
+            else if (v >= std::numeric_limits<int32_t>::min() && v <= std::numeric_limits<int32_t>::max())
+                append_primitive_number<int32_t>(out, VariantType::INT32, static_cast<int32_t>(v));
+            else
+                append_primitive_number<int64_t>(out, VariantType::INT64, v);
+            return Status::OK();
         }
         if (slice.isUInt()) {
             uint64_t value = slice.getUIntUnchecked();
             if (value <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-                return encode_primitive_number<int64_t>(VariantType::INT64, static_cast<int64_t>(value));
+                append_primitive_number<int64_t>(out, VariantType::INT64, static_cast<int64_t>(value));
+                return Status::OK();
             }
-            return encode_primitive_number<double>(VariantType::DOUBLE, static_cast<double>(value));
+            append_primitive_number<double>(out, VariantType::DOUBLE, static_cast<double>(value));
+            return Status::OK();
         }
         if (slice.isDouble()) {
-            return encode_primitive_number<double>(VariantType::DOUBLE, slice.getDouble());
+            append_primitive_number<double>(out, VariantType::DOUBLE, slice.getDouble());
+            return Status::OK();
         }
         if (slice.isString() || slice.isBinary()) {
             vpack::ValueLength len;
             const char* str = slice.getStringUnchecked(len);
-            return encode_string_or_binary(VariantType::STRING, std::string_view(str, len));
+            append_string_or_binary_value(out, VariantType::STRING, std::string_view(str, len));
+            return Status::OK();
         }
         if (slice.isArray()) {
             vpack::ArrayIterator it(slice);
-            std::vector<std::string> elements;
-            elements.reserve(slice.length());
+            std::string payload;
+            std::vector<uint32_t> end_offsets;
+            end_offsets.reserve(slice.length());
             for (; it.valid(); it.next()) {
-                ASSIGN_OR_RETURN(std::string element, encode_json_to_variant_value(it.value(), key_to_id));
-                elements.emplace_back(std::move(element));
+                RETURN_IF_ERROR(encode_json_to_variant_value(it.value(), key_to_id, &payload));
+                end_offsets.emplace_back(static_cast<uint32_t>(payload.size()));
             }
-            return VariantEncoder::encode_array_from_elements(elements);
+            VariantEncoder::append_array_container(out, end_offsets, payload);
+            return Status::OK();
         }
         if (slice.isObject()) {
             vpack::ObjectIterator it(slice);
-            std::map<uint32_t, std::string> fields;
+            std::map<uint32_t, vpack::Slice> fields;
             for (; it.valid(); it.next()) {
                 auto current = *it;
                 auto key = current.key.stringView();
@@ -455,10 +497,21 @@ StatusOr<std::string> encode_json_to_variant_value(const vpack::Slice& slice,
                     return Status::VariantError("Variant metadata missing field: " +
                                                 std::string(key.data(), key.size()));
                 }
-                ASSIGN_OR_RETURN(std::string field_value, encode_json_to_variant_value(current.value, key_to_id));
-                fields[it_key->second] = std::move(field_value);
+                fields[it_key->second] = current.value;
             }
-            return VariantEncoder::encode_object_from_fields(fields);
+            std::string payload;
+            payload.reserve(slice.byteSize());
+            std::vector<uint32_t> field_ids;
+            std::vector<uint32_t> end_offsets;
+            field_ids.reserve(fields.size());
+            end_offsets.reserve(fields.size());
+            for (const auto& [field_id, field_value] : fields) {
+                RETURN_IF_ERROR(encode_json_to_variant_value(field_value, key_to_id, &payload));
+                field_ids.emplace_back(field_id);
+                end_offsets.emplace_back(static_cast<uint32_t>(payload.size()));
+            }
+            VariantEncoder::append_object_container(out, field_ids, end_offsets, payload);
+            return Status::OK();
         }
     } catch (const vpack::Exception& e) {
         return fromVPackException(e);
@@ -466,6 +519,13 @@ StatusOr<std::string> encode_json_to_variant_value(const vpack::Slice& slice,
 
     return Status::NotSupported(
             fmt::format("Unsupported JSON type {} for variant encoding type", valueTypeName(slice.type())));
+}
+
+StatusOr<std::string> encode_json_to_variant_value(const vpack::Slice& slice,
+                                                   const std::unordered_map<std::string, uint32_t>& key_to_id) {
+    std::string out;
+    RETURN_IF_ERROR(encode_json_to_variant_value(slice, key_to_id, &out));
+    return out;
 }
 
 Status collect_object_keys_from_datum(const Datum& datum, const TypeDescriptor& type,
@@ -528,62 +588,71 @@ Status collect_object_keys_from_datum(const Datum& datum, const TypeDescriptor& 
     }
 }
 
-StatusOr<std::string> encode_datum_to_variant_value(const Datum& datum, const TypeDescriptor& type,
-                                                    const std::unordered_map<std::string, uint32_t>& key_to_id) {
+Status encode_datum_to_variant_value(const Datum& datum, const TypeDescriptor& type,
+                                     const std::unordered_map<std::string, uint32_t>& key_to_id, std::string* out) {
     if (datum.is_null()) {
-        return encode_null_value();
+        VariantEncoder::append_null_value(out);
+        return Status::OK();
     }
 
     switch (type.type) {
     case TYPE_NULL:
-        return encode_null_value();
+        VariantEncoder::append_null_value(out);
+        return Status::OK();
     case TYPE_BOOLEAN:
-        return encode_boolean(datum.get<int8_t>() != 0);
+        append_boolean_value(out, datum.get<int8_t>() != 0);
+        return Status::OK();
     case TYPE_TINYINT:
-        return encode_primitive_number<int8_t>(VariantType::INT8, datum.get_int8());
+        append_primitive_number<int8_t>(out, VariantType::INT8, datum.get_int8());
+        return Status::OK();
     case TYPE_SMALLINT:
-        return encode_primitive_number<int16_t>(VariantType::INT16, datum.get_int16());
+        append_primitive_number<int16_t>(out, VariantType::INT16, datum.get_int16());
+        return Status::OK();
     case TYPE_INT:
-        return encode_primitive_number<int32_t>(VariantType::INT32, datum.get_int32());
+        append_primitive_number<int32_t>(out, VariantType::INT32, datum.get_int32());
+        return Status::OK();
     case TYPE_BIGINT:
-        return encode_primitive_number<int64_t>(VariantType::INT64, datum.get_int64());
+        append_primitive_number<int64_t>(out, VariantType::INT64, datum.get_int64());
+        return Status::OK();
     case TYPE_LARGEINT: {
         uint8_t header = static_cast<uint8_t>(VariantType::DECIMAL16) << VariantValue::kValueHeaderBitShift;
-        std::string out(1, static_cast<char>(header));
-        out.push_back(0); // scale
-        append_int128_le(out, datum.get_int128());
-        return out;
+        out->push_back(static_cast<char>(header));
+        out->push_back(0); // scale
+        append_int128_le(*out, datum.get_int128());
+        return Status::OK();
     }
     case TYPE_FLOAT:
-        return encode_primitive_number<float>(VariantType::FLOAT, datum.get_float());
+        append_primitive_number<float>(out, VariantType::FLOAT, datum.get_float());
+        return Status::OK();
     case TYPE_DOUBLE:
-        return encode_primitive_number<double>(VariantType::DOUBLE, datum.get_double());
+        append_primitive_number<double>(out, VariantType::DOUBLE, datum.get_double());
+        return Status::OK();
     case TYPE_DECIMALV2: {
         uint8_t header = static_cast<uint8_t>(VariantType::DECIMAL16) << VariantValue::kValueHeaderBitShift;
-        std::string out(1, static_cast<char>(header));
-        out.push_back(static_cast<char>(DecimalV2Value::SCALE));
-        append_int128_le(out, datum.get_decimal().value());
-        return out;
+        out->push_back(static_cast<char>(header));
+        out->push_back(static_cast<char>(DecimalV2Value::SCALE));
+        append_int128_le(*out, datum.get_decimal().value());
+        return Status::OK();
     }
     case TYPE_DECIMAL32: {
         if (type.scale < 0 || type.scale > decimal_precision_limit<int32_t>) {
             return Status::InvalidArgument(fmt::format("Invalid decimal32 scale for variant encoding: {}", type.scale));
         }
         uint8_t header = static_cast<uint8_t>(VariantType::DECIMAL4) << VariantValue::kValueHeaderBitShift;
-        std::string out(1, static_cast<char>(header));
-        out.push_back(static_cast<char>(type.scale));
-        append_little_endian(&out, datum.get_int32());
-        return out;
+        out->push_back(static_cast<char>(header));
+        out->push_back(static_cast<char>(type.scale));
+        append_little_endian(out, datum.get_int32());
+        return Status::OK();
     }
     case TYPE_DECIMAL64: {
         if (type.scale < 0 || type.scale > decimal_precision_limit<int64_t>) {
             return Status::InvalidArgument(fmt::format("Invalid decimal64 scale for variant encoding: {}", type.scale));
         }
         uint8_t header = static_cast<uint8_t>(VariantType::DECIMAL8) << VariantValue::kValueHeaderBitShift;
-        std::string out(1, static_cast<char>(header));
-        out.push_back(static_cast<char>(type.scale));
-        append_little_endian(&out, datum.get_int64());
-        return out;
+        out->push_back(static_cast<char>(header));
+        out->push_back(static_cast<char>(type.scale));
+        append_little_endian(out, datum.get_int64());
+        return Status::OK();
     }
     case TYPE_DECIMAL128: {
         if (type.scale < 0 || type.scale > decimal_precision_limit<int128_t>) {
@@ -591,60 +660,64 @@ StatusOr<std::string> encode_datum_to_variant_value(const Datum& datum, const Ty
                     fmt::format("Invalid decimal128 scale for variant encoding: {}", type.scale));
         }
         uint8_t header = static_cast<uint8_t>(VariantType::DECIMAL16) << VariantValue::kValueHeaderBitShift;
-        std::string out(1, static_cast<char>(header));
-        out.push_back(static_cast<char>(type.scale));
-        append_int128_le(out, datum.get_int128());
-        return out;
+        out->push_back(static_cast<char>(header));
+        out->push_back(static_cast<char>(type.scale));
+        append_int128_le(*out, datum.get_int128());
+        return Status::OK();
     }
     case TYPE_CHAR:
     case TYPE_VARCHAR:
-        return encode_string_value(datum.get_slice());
+        append_string_value(out, datum.get_slice());
+        return Status::OK();
     case TYPE_JSON: {
         const JsonValue* json = datum.get_json();
         if (json == nullptr || json->is_null_or_none()) {
-            return encode_null_value();
+            VariantEncoder::append_null_value(out);
+            return Status::OK();
         }
-        return encode_json_to_variant_value(json->to_vslice(), key_to_id);
+        return encode_json_to_variant_value(json->to_vslice(), key_to_id, out);
     }
     case TYPE_DATE: {
         int32_t days = datum.get_date().to_days_since_unix_epoch();
         uint8_t header = static_cast<uint8_t>(VariantType::DATE) << VariantValue::kValueHeaderBitShift;
-        std::string out(1, static_cast<char>(header));
-        append_little_endian(&out, days);
-        return out;
+        out->push_back(static_cast<char>(header));
+        append_little_endian(out, days);
+        return Status::OK();
     }
     case TYPE_DATETIME: {
         int64_t micros = datum.get_timestamp().to_unix_microsecond();
         uint8_t header = static_cast<uint8_t>(VariantType::TIMESTAMP_NTZ) << VariantValue::kValueHeaderBitShift;
-        std::string out(1, static_cast<char>(header));
-        append_little_endian(&out, micros);
-        return out;
+        out->push_back(static_cast<char>(header));
+        append_little_endian(out, micros);
+        return Status::OK();
     }
     case TYPE_TIME: {
         double seconds = datum.get_double();
         int64_t micros = static_cast<int64_t>(seconds * USECS_PER_SEC);
         uint8_t header = static_cast<uint8_t>(VariantType::TIME_NTZ) << VariantValue::kValueHeaderBitShift;
-        std::string out(1, static_cast<char>(header));
-        append_little_endian(&out, micros);
-        return out;
+        out->push_back(static_cast<char>(header));
+        append_little_endian(out, micros);
+        return Status::OK();
     }
     case TYPE_ARRAY: {
         const auto& elements = datum.get_array();
         const auto& element_type = type.children[0];
-        std::vector<std::string> encoded_elements;
-        encoded_elements.reserve(elements.size());
+        std::string payload;
+        std::vector<uint32_t> end_offsets;
+        end_offsets.reserve(elements.size());
         for (const auto& element : elements) {
-            ASSIGN_OR_RETURN(auto encoded, encode_datum_to_variant_value(element, element_type, key_to_id));
-            encoded_elements.emplace_back(std::move(encoded));
+            RETURN_IF_ERROR(encode_datum_to_variant_value(element, element_type, key_to_id, &payload));
+            end_offsets.emplace_back(static_cast<uint32_t>(payload.size()));
         }
-        return VariantEncoder::encode_array_from_elements(encoded_elements);
+        VariantEncoder::append_array_container(out, end_offsets, payload);
+        return Status::OK();
     }
     case TYPE_MAP: {
         const auto& map = datum.get_map();
         const auto& key_type = type.children[0];
         const auto& value_type = type.children[1];
         const TypeInfoPtr key_type_info = get_type_info(key_type);
-        std::map<uint32_t, std::string> fields;
+        std::map<uint32_t, const Datum*> fields;
         for (const auto& [key, value] : map) {
             const Datum key_datum(key);
             if (key_datum.is_null()) {
@@ -655,10 +728,20 @@ StatusOr<std::string> encode_datum_to_variant_value(const Datum& datum, const Ty
             if (it == key_to_id.end()) {
                 return Status::VariantError("Variant metadata missing field: " + key_str);
             }
-            ASSIGN_OR_RETURN(auto encoded_value, encode_datum_to_variant_value(value, value_type, key_to_id));
-            fields[it->second] = std::move(encoded_value);
+            fields[it->second] = &value;
         }
-        return VariantEncoder::encode_object_from_fields(fields);
+        std::string payload;
+        std::vector<uint32_t> field_ids;
+        std::vector<uint32_t> end_offsets;
+        field_ids.reserve(fields.size());
+        end_offsets.reserve(fields.size());
+        for (const auto& [field_id, field_value] : fields) {
+            RETURN_IF_ERROR(encode_datum_to_variant_value(*field_value, value_type, key_to_id, &payload));
+            field_ids.emplace_back(field_id);
+            end_offsets.emplace_back(static_cast<uint32_t>(payload.size()));
+        }
+        VariantEncoder::append_object_container(out, field_ids, end_offsets, payload);
+        return Status::OK();
     }
     case TYPE_STRUCT: {
         const auto& fields = datum.get_struct();
@@ -671,21 +754,42 @@ StatusOr<std::string> encode_datum_to_variant_value(const Datum& datum, const Ty
             return Status::InvalidArgument(fmt::format("Struct field names size {} does not match field count {}",
                                                        type.field_names.size(), fields.size()));
         }
-        std::map<uint32_t, std::string> encoded_fields;
+        std::vector<std::pair<uint32_t, size_t>> ordered_fields;
+        ordered_fields.reserve(fields.size());
         for (size_t i = 0; i < fields.size(); ++i) {
             const std::string& field_name = type.field_names[i];
             auto it = key_to_id.find(field_name);
             if (it == key_to_id.end()) {
                 return Status::VariantError("Variant metadata missing field: " + field_name);
             }
-            ASSIGN_OR_RETURN(auto encoded_value, encode_datum_to_variant_value(fields[i], type.children[i], key_to_id));
-            encoded_fields[it->second] = std::move(encoded_value);
+            ordered_fields.emplace_back(it->second, i);
         }
-        return VariantEncoder::encode_object_from_fields(encoded_fields);
+        std::sort(ordered_fields.begin(), ordered_fields.end(),
+                  [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+        std::string payload;
+        std::vector<uint32_t> field_ids;
+        std::vector<uint32_t> end_offsets;
+        field_ids.reserve(ordered_fields.size());
+        end_offsets.reserve(ordered_fields.size());
+        for (const auto& [field_id, field_index] : ordered_fields) {
+            RETURN_IF_ERROR(encode_datum_to_variant_value(fields[field_index], type.children[field_index], key_to_id,
+                                                          &payload));
+            field_ids.emplace_back(field_id);
+            end_offsets.emplace_back(static_cast<uint32_t>(payload.size()));
+        }
+        VariantEncoder::append_object_container(out, field_ids, end_offsets, payload);
+        return Status::OK();
     }
     default:
         return Status::NotSupported(fmt::format("Unsupported type {} for variant encoding", type.debug_string()));
     }
+}
+
+StatusOr<std::string> encode_datum_to_variant_value(const Datum& datum, const TypeDescriptor& type,
+                                                    const std::unordered_map<std::string, uint32_t>& key_to_id) {
+    std::string out;
+    RETURN_IF_ERROR(encode_datum_to_variant_value(datum, type, key_to_id, &out));
+    return out;
 }
 
 StatusOr<VariantRowValue> VariantEncoder::encode_datum(const Datum& datum, const TypeDescriptor& type) {

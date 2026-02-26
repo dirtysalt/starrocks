@@ -14,6 +14,7 @@
 
 #include "column/variant_builder.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -180,42 +181,55 @@ static void collect_object_keys(const VariantNode& node, std::unordered_set<std:
     }
 }
 
-inline std::string encode_null_value() {
-    return std::string(VariantValue::kEmptyValue);
-}
-
-static StatusOr<std::string> encode_node_value(const VariantNode& node,
-                                               const std::unordered_map<std::string, uint32_t>& dict_indexes) {
+static Status encode_node_value(const VariantNode& node, const std::unordered_map<std::string, uint32_t>& dict_indexes,
+                                std::string* out) {
     if (node.kind == NodeKind::kNull) {
-        return encode_null_value();
+        VariantEncoder::append_null_value(out);
+        return Status::OK();
     }
     if (node.kind == NodeKind::kScalar) {
-        return node.scalar_raw;
+        out->append(node.scalar_raw.data(), node.scalar_raw.size());
+        return Status::OK();
     }
     if (node.kind == NodeKind::kArray) {
-        std::vector<std::string> elements;
-        elements.reserve(node.elements.size());
+        std::string payload;
+        std::vector<uint32_t> end_offsets;
+        end_offsets.reserve(node.elements.size());
         for (const auto& element : node.elements) {
             if (element == nullptr) {
-                elements.emplace_back(encode_null_value());
+                VariantEncoder::append_null_value(&payload);
             } else {
-                ASSIGN_OR_RETURN(auto value, encode_node_value(*element, dict_indexes));
-                elements.emplace_back(std::move(value));
+                RETURN_IF_ERROR(encode_node_value(*element, dict_indexes, &payload));
             }
+            end_offsets.emplace_back(static_cast<uint32_t>(payload.size()));
         }
-        return VariantEncoder::encode_array_from_elements(elements);
+        VariantEncoder::append_array_container(out, end_offsets, payload);
+        return Status::OK();
     }
 
-    std::map<uint32_t, std::string> fields;
+    std::vector<std::pair<uint32_t, const VariantNode*>> fields;
+    fields.reserve(node.fields.size());
     for (const auto& [key, child] : node.fields) {
         auto it = dict_indexes.find(key);
         if (it == dict_indexes.end()) {
             return Status::InvalidArgument("variant mutable builder miss key index: " + key);
         }
-        ASSIGN_OR_RETURN(auto value, encode_node_value(*child, dict_indexes));
-        fields[it->second] = std::move(value);
+        fields.emplace_back(it->second, child.get());
     }
-    return VariantEncoder::encode_object_from_fields(fields);
+    std::sort(fields.begin(), fields.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+
+    std::string payload;
+    std::vector<uint32_t> field_ids;
+    std::vector<uint32_t> end_offsets;
+    field_ids.reserve(fields.size());
+    end_offsets.reserve(fields.size());
+    for (const auto& [field_id, child] : fields) {
+        RETURN_IF_ERROR(encode_node_value(*child, dict_indexes, &payload));
+        field_ids.emplace_back(field_id);
+        end_offsets.emplace_back(static_cast<uint32_t>(payload.size()));
+    }
+    VariantEncoder::append_object_container(out, field_ids, end_offsets, payload);
+    return Status::OK();
 }
 
 // Apply an overlay VariantNode at the position described by path within root.
@@ -277,7 +291,8 @@ StatusOr<VariantRowValue> VariantBuilder::build() const {
     collect_object_keys(root, &keys);
     std::unordered_map<std::string, uint32_t> key_to_id;
     ASSIGN_OR_RETURN(auto metadata, VariantEncoder::build_variant_metadata(keys, &key_to_id));
-    ASSIGN_OR_RETURN(auto value, encode_node_value(root, key_to_id));
+    std::string value;
+    RETURN_IF_ERROR(encode_node_value(root, key_to_id, &value));
     return VariantRowValue::create(metadata, value);
 }
 

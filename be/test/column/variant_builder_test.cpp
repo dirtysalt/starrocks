@@ -277,4 +277,33 @@ PARALLEL_TEST(VariantBuilderTest, object_key_order_stable_with_overlay_append) {
     ASSERT_EQ(R"({"a":2,"b":1,"c":3,"d":4})", json.value());
 }
 
+PARALLEL_TEST(VariantBuilderTest, deep_overlay_with_array_and_object) {
+    VariantBuilder builder;
+    auto base = VariantEncoder::encode_json_text_to_variant(R"({"root":{"arr":[{"x":1}]}})");
+    ASSERT_TRUE(base.ok());
+    std::vector<VariantBuilder::Overlay> overlays{
+            {.path = VariantPath{}, .value = std::move(base.value())},
+    };
+    ASSERT_TRUE(builder.set_overlays(std::move(overlays)).ok());
+    auto base_row = builder.build();
+    ASSERT_TRUE(base_row.ok());
+
+    VariantBuilder patch_builder(&base_row.value());
+    auto arr = VariantEncoder::encode_json_text_to_variant(R"([{"x":1,"y":2}])");
+    ASSERT_TRUE(arr.ok());
+    auto z = VariantEncoder::encode_json_text_to_variant(R"({"k":"v"})");
+    ASSERT_TRUE(z.ok());
+    std::vector<VariantBuilder::Overlay> patch{
+            {.path = MakePath("root.arr"), .value = std::move(arr.value())},
+            {.path = MakePath("root.obj"), .value = std::move(z.value())},
+    };
+    ASSERT_TRUE(patch_builder.set_overlays(std::move(patch)).ok());
+
+    auto out = patch_builder.build();
+    ASSERT_TRUE(out.ok());
+    auto json = out->to_json();
+    ASSERT_TRUE(json.ok());
+    ASSERT_EQ(R"({"root":{"arr":[{"x":1,"y":2}],"obj":{"k":"v"}}})", json.value());
+}
+
 } // namespace starrocks

@@ -86,7 +86,8 @@ static uint8_t* write_little_endian_8(uint8_t value, uint8_t* buff) {
     return buff + sizeof(value);
 }
 
-static const uint8_t* read_little_endian_8(const uint8_t* buff, uint8_t* value) {
+static StatusOr<const uint8_t*> read_little_endian_8(const uint8_t* buff, const uint8_t* end, uint8_t* value) {
+    RETURN_IF_ERROR(check_remaining_size(buff, end, sizeof(uint8_t)));
     *value = *buff;
     return buff + sizeof(*value);
 }
@@ -460,13 +461,13 @@ public:
         return buff;
     }
 
-    static StatusOr<const uint8_t*> deserialize(const uint8_t* buff, VariantColumn* column) {
+    static StatusOr<const uint8_t*> deserialize(const uint8_t* buff, const uint8_t* end, VariantColumn* column) {
         uint8_t mode_flag = 0;
-        buff = read_little_endian_8(buff, &mode_flag);
+        ASSIGN_OR_RETURN(buff, read_little_endian_8(buff, end, &mode_flag));
         column->reset_column();
 
         if (mode_flag == static_cast<uint8_t>(VariantMode::kShreddedMode)) {
-            return deserialize_shredded(buff, column);
+            return deserialize_shredded(buff, end, column);
         }
         return Status::Corruption(fmt::format("Unknown variant column mode: {}", mode_flag));
     }
@@ -631,15 +632,17 @@ private:
         return buff;
     }
 
-    static StatusOr<const uint8_t*> deserialize_shredded(const uint8_t* buff, VariantColumn* column) {
+    static StatusOr<const uint8_t*> deserialize_shredded(const uint8_t* buff, const uint8_t* end,
+                                                         VariantColumn* column) {
         // shredded_paths
         uint32_t num_paths = 0;
-        buff = read_little_endian_32(buff, &num_paths);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &num_paths));
         std::vector<std::string> paths;
         paths.reserve(num_paths);
         for (uint32_t i = 0; i < num_paths; ++i) {
             uint32_t path_len = 0;
-            buff = read_little_endian_32(buff, &path_len);
+            ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &path_len));
+            RETURN_IF_ERROR(check_remaining_size(buff, end, path_len));
             std::string path(reinterpret_cast<const char*>(buff), path_len);
             paths.push_back(std::move(path));
             buff += path_len;
@@ -647,7 +650,7 @@ private:
 
         // shredded_types
         uint32_t num_types = 0;
-        buff = read_little_endian_32(buff, &num_types);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &num_types));
         if (num_types != num_paths) {
             return Status::Corruption(
                     fmt::format("Shredded type count {} does not match path count {}", num_types, num_paths));
@@ -656,13 +659,13 @@ private:
         types.reserve(num_types);
         for (uint32_t i = 0; i < num_types; ++i) {
             TypeDescriptor type_desc;
-            buff = deserialize_type_descriptor(buff, &type_desc);
+            ASSIGN_OR_RETURN(buff, deserialize_type_descriptor(buff, end, &type_desc));
             types.push_back(std::move(type_desc));
         }
 
         // typed_columns
         uint32_t num_typed_cols = 0;
-        buff = read_little_endian_32(buff, &num_typed_cols);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &num_typed_cols));
         if (num_typed_cols != num_paths) {
             return Status::Corruption(
                     fmt::format("Typed column count {} does not match path count {}", num_typed_cols, num_paths));
@@ -671,9 +674,9 @@ private:
         typed_cols.reserve(num_typed_cols);
         for (uint32_t i = 0; i < num_typed_cols; ++i) {
             uint8_t is_nullable = 0;
-            buff = read_little_endian_8(buff, &is_nullable);
+            ASSIGN_OR_RETURN(buff, read_little_endian_8(buff, end, &is_nullable));
             MutableColumnPtr col = ColumnHelper::create_column(types[i], is_nullable != 0);
-            ASSIGN_OR_RETURN(buff, serde::ColumnArraySerde::deserialize(buff, col.get(), false, 0));
+            ASSIGN_OR_RETURN(buff, serde::ColumnArraySerde::deserialize(buff, end, col.get(), false, 0));
             typed_cols.push_back(std::move(col));
         }
 
@@ -681,24 +684,24 @@ private:
         // metadata/remain are always BinaryColumn (nulls encoded as binary sentinel payloads).
         // The is_nullable byte is read for wire-format backward compatibility but always ignored.
         uint8_t has_metadata = 0;
-        buff = read_little_endian_8(buff, &has_metadata);
+        ASSIGN_OR_RETURN(buff, read_little_endian_8(buff, end, &has_metadata));
         BinaryColumn::MutablePtr metadata_col;
         if (has_metadata) {
             uint8_t is_nullable_metadata = 0;
-            buff = read_little_endian_8(buff, &is_nullable_metadata);
+            ASSIGN_OR_RETURN(buff, read_little_endian_8(buff, end, &is_nullable_metadata));
             metadata_col = BinaryColumn::create();
-            ASSIGN_OR_RETURN(buff, serde::ColumnArraySerde::deserialize(buff, metadata_col.get(), false, 0));
+            ASSIGN_OR_RETURN(buff, serde::ColumnArraySerde::deserialize(buff, end, metadata_col.get(), false, 0));
         }
 
         // remain_value_column
         uint8_t has_remain = 0;
-        buff = read_little_endian_8(buff, &has_remain);
+        ASSIGN_OR_RETURN(buff, read_little_endian_8(buff, end, &has_remain));
         BinaryColumn::MutablePtr remain_col;
         if (has_remain) {
             uint8_t is_nullable_remain = 0;
-            buff = read_little_endian_8(buff, &is_nullable_remain);
+            ASSIGN_OR_RETURN(buff, read_little_endian_8(buff, end, &is_nullable_remain));
             remain_col = BinaryColumn::create();
-            ASSIGN_OR_RETURN(buff, serde::ColumnArraySerde::deserialize(buff, remain_col.get(), false, 0));
+            ASSIGN_OR_RETURN(buff, serde::ColumnArraySerde::deserialize(buff, end, remain_col.get(), false, 0));
         }
 
         column->set_shredded_columns(std::move(paths), std::move(types), std::move(typed_cols), std::move(metadata_col),
@@ -707,59 +710,62 @@ private:
         return buff;
     }
 
-    static const uint8_t* deserialize_type_descriptor(const uint8_t* buff, TypeDescriptor* type_desc) {
+    static StatusOr<const uint8_t*> deserialize_type_descriptor(const uint8_t* buff, const uint8_t* end,
+                                                                TypeDescriptor* type_desc) {
         uint32_t type_val = 0;
-        buff = read_little_endian_32(buff, &type_val);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &type_val));
         type_desc->type = static_cast<LogicalType>(type_val);
 
         uint32_t len_val = 0;
-        buff = read_little_endian_32(buff, &len_val);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &len_val));
         type_desc->len = static_cast<int32_t>(len_val);
 
         uint32_t precision_val = 0;
-        buff = read_little_endian_32(buff, &precision_val);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &precision_val));
         type_desc->precision = static_cast<int32_t>(precision_val);
 
         uint32_t scale_val = 0;
-        buff = read_little_endian_32(buff, &scale_val);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &scale_val));
         type_desc->scale = static_cast<int32_t>(scale_val);
 
         // children
         uint32_t num_children = 0;
-        buff = read_little_endian_32(buff, &num_children);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &num_children));
         type_desc->children.resize(num_children);
         for (uint32_t i = 0; i < num_children; ++i) {
-            buff = deserialize_type_descriptor(buff, &type_desc->children[i]);
+            ASSIGN_OR_RETURN(buff, deserialize_type_descriptor(buff, end, &type_desc->children[i]));
         }
 
         // field_names
         uint32_t num_field_names = 0;
-        buff = read_little_endian_32(buff, &num_field_names);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &num_field_names));
         type_desc->field_names.resize(num_field_names);
         for (uint32_t i = 0; i < num_field_names; ++i) {
             uint32_t name_len = 0;
-            buff = read_little_endian_32(buff, &name_len);
+            ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &name_len));
+            RETURN_IF_ERROR(check_remaining_size(buff, end, name_len));
             type_desc->field_names[i].assign(reinterpret_cast<const char*>(buff), name_len);
             buff += name_len;
         }
 
         // field_ids
         uint32_t num_field_ids = 0;
-        buff = read_little_endian_32(buff, &num_field_ids);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &num_field_ids));
         type_desc->field_ids.resize(num_field_ids);
         for (uint32_t i = 0; i < num_field_ids; ++i) {
             uint32_t fid = 0;
-            buff = read_little_endian_32(buff, &fid);
+            ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &fid));
             type_desc->field_ids[i] = static_cast<int32_t>(fid);
         }
 
         // field_physical_names
         uint32_t num_field_physical_names = 0;
-        buff = read_little_endian_32(buff, &num_field_physical_names);
+        ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &num_field_physical_names));
         type_desc->field_physical_names.resize(num_field_physical_names);
         for (uint32_t i = 0; i < num_field_physical_names; ++i) {
             uint32_t name_len = 0;
-            buff = read_little_endian_32(buff, &name_len);
+            ASSIGN_OR_RETURN(buff, read_little_endian_32(buff, end, &name_len));
+            RETURN_IF_ERROR(check_remaining_size(buff, end, name_len));
             type_desc->field_physical_names[i].assign(reinterpret_cast<const char*>(buff), name_len);
             buff += name_len;
         }

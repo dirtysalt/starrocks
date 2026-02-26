@@ -181,7 +181,7 @@ PARALLEL_TEST(ColumnArraySerdeTest, variant_column_failed_deserialize) {
     ASSERT_OK(ColumnArraySerde::serialize(*c1, buffer.data()));
 
     auto c2 = VariantColumn::create();
-    ASSIGN_OR_ABORT(auto p2, ColumnArraySerde::deserialize(buffer.data(), c2.get()));
+    ASSIGN_OR_ABORT(auto p2, ColumnArraySerde::deserialize(buffer.data(), end, c2.get()));
     ASSERT_EQ(buffer.data() + buffer.size(), p2);
     ASSERT_EQ(1, c2->size());
     ASSERT_TRUE(c2->has_metadata_column());
@@ -218,7 +218,7 @@ PARALLEL_TEST(ColumnArraySerdeTest, variant_column_shredded_typed_only) {
     ASSERT_EQ(buffer.data() + buffer.size(), p1);
 
     auto c2 = VariantColumn::create();
-    ASSIGN_OR_ABORT(auto p2, ColumnArraySerde::deserialize(buffer.data(), c2.get()));
+    ASSIGN_OR_ABORT(auto p2, ColumnArraySerde::deserialize(buffer.data(), buffer.data() + buffer.size(), c2.get()));
     ASSERT_EQ(buffer.data() + buffer.size(), p2);
 
     ASSERT_FALSE(c2->has_metadata_column());
@@ -280,7 +280,7 @@ PARALLEL_TEST(ColumnArraySerdeTest, variant_column_shredded_base_shredded) {
     ASSERT_EQ(buffer.data() + buffer.size(), p1);
 
     auto c2 = VariantColumn::create();
-    ASSIGN_OR_ABORT(auto p2, ColumnArraySerde::deserialize(buffer.data(), c2.get()));
+    ASSIGN_OR_ABORT(auto p2, ColumnArraySerde::deserialize(buffer.data(), buffer.data() + buffer.size(), c2.get()));
     ASSERT_EQ(buffer.data() + buffer.size(), p2);
 
     ASSERT_TRUE(c2->has_metadata_column());
@@ -356,7 +356,7 @@ PARALLEL_TEST(ColumnArraySerdeTest, variant_column_shredded_multiple_paths) {
     ASSERT_EQ(buffer.data() + buffer.size(), p1);
 
     auto c2 = VariantColumn::create();
-    ASSIGN_OR_ABORT(auto p2, ColumnArraySerde::deserialize(buffer.data(), c2.get()));
+    ASSIGN_OR_ABORT(auto p2, ColumnArraySerde::deserialize(buffer.data(), buffer.data() + buffer.size(), c2.get()));
     ASSERT_EQ(buffer.data() + buffer.size(), p2);
 
     ASSERT_EQ(2, c2->size());

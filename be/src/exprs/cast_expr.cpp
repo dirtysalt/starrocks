@@ -41,7 +41,9 @@
 #include "column/json_converter.h"
 #include "column/nullable_column.h"
 #include "column/type_traits.h"
+#include "column/variant_column.h"
 #include "column/variant_converter.h"
+#include "column/variant_encoder.h"
 #include "column/vectorized_fwd.h"
 #include "common/object_pool.h"
 #include "common/status.h"
@@ -59,7 +61,6 @@
 #include "types/json_value.h"
 #include "types/logical_type.h"
 #include "types/type_descriptor.h"
-#include "util/variant_encoder.h"
 
 #ifdef STARROCKS_JIT_ENABLE
 #include "exprs/jit/expr_jit_codegen.h"
@@ -196,15 +197,26 @@ static ColumnPtr cast_to_json_fn(ColumnPtr& column) {
             std::string str = CastToString::apply<RunTimeCppType<FromType>, std::string>(v);
             value = JsonValue::from_string(str);
         } else if constexpr (lt_is_variant<FromType>) {
-            auto json_str = static_cast<VariantRowValue*>(viewer.value(row))->to_json(cctz::local_time_zone());
-            if (!json_str.ok()) {
+            const auto* variant_data_column =
+                    down_cast<const VariantColumn*>(ColumnHelper::get_data_column(column.get()));
+            const size_t variant_row = column->is_constant() ? 0 : row;
+            VariantRowValue variant_buffer;
+            const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
+            if (variant == nullptr) {
                 overflow = true;
-            } else {
-                auto parsed = JsonValue::parse_json_or_string(json_str.value());
-                if (parsed.ok()) {
-                    value = parsed.value();
-                } else {
+            }
+
+            if (!overflow) {
+                auto json_str = variant->to_json(cctz::local_time_zone());
+                if (!json_str.ok()) {
                     overflow = true;
+                } else {
+                    auto parsed = JsonValue::parse_json_or_string(json_str.value());
+                    if (parsed.ok()) {
+                        value = parsed.value();
+                    } else {
+                        overflow = true;
+                    }
                 }
             }
         } else {
@@ -257,6 +269,7 @@ template <LogicalType FromType, LogicalType ToType, bool AllowThrowException>
 static ColumnPtr cast_from_variant_fn(ColumnPtr& column) {
     ColumnViewer<TYPE_VARIANT> viewer(column);
     ColumnBuilder<ToType> builder(viewer.size());
+    const auto* variant_data_column = down_cast<const VariantColumn*>(ColumnHelper::get_data_column(column.get()));
 
     for (int row = 0; row < viewer.size(); ++row) {
         if (viewer.is_null(row)) {
@@ -264,13 +277,16 @@ static ColumnPtr cast_from_variant_fn(ColumnPtr& column) {
             continue;
         }
 
-        const VariantRowValue* variant = viewer.value(row);
+        const size_t variant_row = column->is_constant() ? 0 : row;
+        VariantRowValue variant_buffer;
+        const VariantRowValue* variant = variant_data_column->get_row_value(variant_row, &variant_buffer);
         if (variant == nullptr) {
             builder.append_null();
             continue;
         }
 
-        auto status = cast_variant_value_to<ToType, AllowThrowException>(*variant, cctz::local_time_zone(), builder);
+        auto status =
+                VariantConverter::cast_to<ToType, AllowThrowException>(*variant, cctz::local_time_zone(), builder);
         if (!status.ok()) {
             if constexpr (AllowThrowException) {
                 THROW_RUNTIME_ERROR_WITH_TYPES_AND_VALUE(FromType, ToType, variant->to_string());
@@ -1395,6 +1411,7 @@ DEFINE_STRING_UNARY_FN_WITH_IMPL(DoubleCastToString, v) {
     return {buf, len};
 }
 
+// clang-format off
 // The StringUnaryFunction templace is defined in unary_function.h
 // This place is a trait for this, it's for performance.
 // CastToString will copy string when returning value,
@@ -1418,6 +1435,7 @@ DEFINE_STRING_UNARY_FN_WITH_IMPL(DoubleCastToString, v) {
         }                                                                                                   \
         return result;                                                                                      \
     }
+// clang-format on
 
 DEFINE_INT_CAST_TO_STRING(TYPE_BOOLEAN, TYPE_VARCHAR);
 DEFINE_INT_CAST_TO_STRING(TYPE_TINYINT, TYPE_VARCHAR);

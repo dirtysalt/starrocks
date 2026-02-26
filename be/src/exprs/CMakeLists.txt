@@ -61,7 +61,8 @@ set(EXPR_CORE_FILES
   subfield_expr.cpp
   table_function/json_each.cpp
   time_functions.cpp
-  variant_path_parser.cpp
+  variant_path_reader.cpp
+  variant_functions.cpp
 )
 
 if(STARROCKS_JIT_ENABLE)
@@ -106,7 +107,6 @@ set(EXPR_FILES
   geo_functions.cpp
   inet_aton.cpp
   json_functions.cpp
-  variant_functions.cpp
   locate.cpp
   percentile_functions.cpp
   runtime_filter_bank.cpp

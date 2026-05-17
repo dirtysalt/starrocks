@@ -4250,6 +4250,34 @@ TEST_F(TimeFunctionsTest, IcebergTimestamptzTransTest) {
     }
 }
 
+TEST_F(TimeFunctionsTest, IcebergPreEpochDayHourTransformTest) {
+    {
+        Columns columns_const;
+        auto col1 = TimestampColumn::create();
+        col1->append(TimestampValue::create(1969, 12, 31, 23, 0, 0));
+        col1->append(TimestampValue::create(1969, 12, 31, 0, 0, 0));
+        columns_const.emplace_back(std::move(col1));
+
+        ColumnPtr result = TimeFunctions::iceberg_days_since_epoch_datetime(_utils->get_fn_ctx(), columns_const).value();
+        auto v = ColumnHelper::as_column<Int64Column>(result);
+        ASSERT_EQ(-1, v->get_data()[0]);
+        ASSERT_EQ(-1, v->get_data()[1]);
+    }
+
+    {
+        Columns columns_const;
+        auto col1 = TimestampColumn::create();
+        col1->append(TimestampValue::create(1969, 12, 31, 23, 0, 0));
+        col1->append(TimestampValue::create(1969, 12, 31, 22, 59, 59, 999999));
+        columns_const.emplace_back(std::move(col1));
+
+        ColumnPtr result = TimeFunctions::iceberg_hours_since_epoch_datetime(_utils->get_fn_ctx(), columns_const).value();
+        auto v = ColumnHelper::as_column<Int64Column>(result);
+        ASSERT_EQ(-1, v->get_data()[0]);
+        ASSERT_EQ(-2, v->get_data()[1]);
+    }
+}
+
 TEST_F(TimeFunctionsTest, unixtimeToDatetimeInvalidArgCount) {
     {
         TQueryGlobals globals;

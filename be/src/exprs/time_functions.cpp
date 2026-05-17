@@ -3433,9 +3433,8 @@ StatusOr<ColumnPtr> TimeFunctions::iceberg_days_since_epoch_datetime(FunctionCon
 
 StatusOr<ColumnPtr> TimeFunctions::iceberg_timestamptz_days_since_epoch_datetime(FunctionContext* context,
                                                                                  const starrocks::Columns& columns) {
-    return evaluate_iceberg_timestamptz_transform(context, columns, [](const TimestampValue& timestamp) {
-        return iceberg_days_since_epoch(timestamp);
-    });
+    return evaluate_iceberg_timestamptz_transform(
+            context, columns, [](const TimestampValue& timestamp) { return iceberg_days_since_epoch(timestamp); });
 }
 
 DEFINE_UNARY_FN_WITH_IMPL(iceberg_hours_since_epoch_datetimeImpl, v) {
@@ -3449,10 +3448,9 @@ StatusOr<ColumnPtr> TimeFunctions::iceberg_hours_since_epoch_datetime(FunctionCo
 }
 
 StatusOr<ColumnPtr> TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(FunctionContext* context,
-                                                                                   const starrocks::Columns& columns) {
-    return evaluate_iceberg_timestamptz_transform(context, columns, [](const TimestampValue& timestamp) {
-        return iceberg_hours_since_epoch(timestamp);
-    });
+                                                                                  const starrocks::Columns& columns) {
+    return evaluate_iceberg_timestamptz_transform(
+            context, columns, [](const TimestampValue& timestamp) { return iceberg_hours_since_epoch(timestamp); });
 }
 
 // used as start point of time_slice.

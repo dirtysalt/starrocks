@@ -4210,7 +4210,7 @@ TEST_F(TimeFunctionsTest, IcebergTimestamptzTransTest) {
     {
         RuntimeState* state = _utils->get_fn_ctx()->state();
         std::string prev_timezone = state->timezone();
-        ASSERT_TRUE(state->set_timezone("+00:00"));
+        ASSERT_TRUE(state->set_timezone("Etc/UTC"));
         DeferOp defer([&]() { state->set_timezone(prev_timezone); });
 
         Columns columns_const;

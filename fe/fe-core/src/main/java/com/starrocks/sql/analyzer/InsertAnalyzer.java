@@ -39,7 +39,6 @@ import com.starrocks.common.FeConstants;
 import com.starrocks.common.util.PropertyAnalyzer;
 import com.starrocks.common.util.concurrent.lock.LockType;
 import com.starrocks.common.util.concurrent.lock.Locker;
-import com.starrocks.connector.iceberg.IcebergPartitionTransform;
 import com.starrocks.connector.iceberg.IcebergRowLineageUtils;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.server.CatalogMgr;
@@ -210,20 +209,6 @@ public class InsertAnalyzer {
                     if (isUnSupportedPartitionColumnType(column.getType())) {
                         throw new SemanticException("Unsupported partition column type [%s] for %s table sink",
                                 column.getType().canonicalName(), table.getType());
-                    }
-                }
-            } else {
-                for (PartitionField field : ((IcebergTable) table).getNativeTable().spec().fields()) {
-                    org.apache.iceberg.types.Type type = ((IcebergTable) table).getNativeTable()
-                            .schema().findType(field.sourceId());
-                    if (type instanceof org.apache.iceberg.types.Types.TimestampType
-                            && ((org.apache.iceberg.types.Types.TimestampType) type).shouldAdjustToUTC()) {
-                        IcebergPartitionTransform transform =
-                                IcebergPartitionTransform.fromString(field.transform().toString());
-                        if (transform == IcebergPartitionTransform.TRUNCATE) {
-                            throw new SemanticException("Partition column %s with timezone does not support " +
-                                    "truncate transform for sink now", field.name());
-                        }
                     }
                 }
             }

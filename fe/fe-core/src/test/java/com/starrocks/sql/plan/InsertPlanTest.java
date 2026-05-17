@@ -1176,24 +1176,6 @@ public class InsertPlanTest extends PlanTestBase {
         assertHashPartitionedByExpression(actualRes, "__iceberg_transform_truncate");
     }
 
-    @Test
-    public void testInsertIcebergWithGlobalShuffleTruncateTransformPartitionForTimestampWithZoneRejected()
-            throws Exception {
-        Schema icebergSchema = new Schema(
-                Types.NestedField.required(1, "ts", Types.TimestampType.withZone()),
-                Types.NestedField.required(2, "k2", Types.IntegerType.get())
-        );
-        PartitionSpec truncateSpec = PartitionSpec.builderFor(icebergSchema).truncate("ts", 5).build();
-        Column ts = new Column("ts", DateType.DATETIME);
-        Column k2 = new Column("k2", IntegerType.INT);
-        SemanticException exception = Assertions.assertThrows(SemanticException.class, () ->
-                getIcebergInsertExecPlanWithGlobalShuffle(
-                        "iceberg_catalog_transform_truncate_tz", "iceberg_truncate_tz_table", 12345578,
-                        icebergSchema, truncateSpec, Lists.newArrayList(ts, k2), Lists.newArrayList(ts),
-                        Arrays.asList(0), "select ts, id from iceberg_shuffle_src"));
-        Assertions.assertTrue(exception.getMessage().contains("truncate transform"));
-    }
-
     private String getIcebergInsertExecPlanWithGlobalShuffle(String catalogName, String tableName, long tableId,
                                                              Schema icebergSchema, PartitionSpec partitionSpec,
                                                              List<Column> fullSchema, List<Column> partitionColumns,
@@ -1296,8 +1278,15 @@ public class InsertPlanTest extends PlanTestBase {
             }
         };
 
-        return getInsertExecPlan(String.format(
-                "explain insert into %s.iceberg_db.%s %s", catalogName, tableName, selectSql));
+        boolean enableMaterializedViewRewrite =
+                connectContext.getSessionVariable().isEnableMaterializedViewRewrite();
+        connectContext.getSessionVariable().setEnableMaterializedViewRewrite(false);
+        try {
+            return getInsertExecPlan(String.format(
+                    "explain insert into %s.iceberg_db.%s %s", catalogName, tableName, selectSql));
+        } finally {
+            connectContext.getSessionVariable().setEnableMaterializedViewRewrite(enableMaterializedViewRewrite);
+        }
     }
 
     private void assertHashPartitionedByExpression(String actualRes, String expectedExpr) {

@@ -893,6 +893,7 @@ public class InsertPlanTest extends PlanTestBase {
 
                 nativeTable.spec();
                 result = PartitionSpec.unpartitioned();
+                minTimes = 0;
             }
         };
 

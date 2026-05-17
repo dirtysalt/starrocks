@@ -678,11 +678,19 @@ vectorized_functions = [
 
     [50620, '__iceberg_transform_year', True, False, 'BIGINT', ['DATE'], 'TimeFunctions::iceberg_years_since_epoch_date'],
     [50621, '__iceberg_transform_year', True, False, 'BIGINT', ['DATETIME'], 'TimeFunctions::iceberg_years_since_epoch_datetime'],
+    [50622, '__iceberg_transform_timestamptz_year', True, False, 'BIGINT', ['DATETIME'],
+     'TimeFunctions::iceberg_timestamptz_years_since_epoch_datetime'],
     [50630, '__iceberg_transform_month', True, False, 'BIGINT', ['DATE'], 'TimeFunctions::iceberg_months_since_epoch_date'],
     [50631, '__iceberg_transform_month', True, False, 'BIGINT', ['DATETIME'], 'TimeFunctions::iceberg_months_since_epoch_datetime'],
+    [50632, '__iceberg_transform_timestamptz_month', True, False, 'BIGINT', ['DATETIME'],
+     'TimeFunctions::iceberg_timestamptz_months_since_epoch_datetime'],
     [50640, '__iceberg_transform_day', True, False, 'BIGINT', ['DATE'], 'TimeFunctions::iceberg_days_since_epoch_date'],
     [50641, '__iceberg_transform_day', True, False, 'BIGINT', ['DATETIME'], 'TimeFunctions::iceberg_days_since_epoch_datetime'],
+    [50642, '__iceberg_transform_timestamptz_day', True, False, 'BIGINT', ['DATETIME'],
+     'TimeFunctions::iceberg_timestamptz_days_since_epoch_datetime'],
     [50650, '__iceberg_transform_hour', True, False, 'BIGINT', ['DATETIME'], 'TimeFunctions::iceberg_hours_since_epoch_datetime'],
+    [50651, '__iceberg_transform_timestamptz_hour', True, False, 'BIGINT', ['DATETIME'],
+     'TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime'],
 
     # 60xxx: like predicate
     # important ref: LikePredicate.java, must keep name equals LikePredicate.Operator

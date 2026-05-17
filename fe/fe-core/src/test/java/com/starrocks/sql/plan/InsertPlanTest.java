@@ -1070,6 +1070,78 @@ public class InsertPlanTest extends PlanTestBase {
     }
 
     @Test
+    public void testInsertIcebergWithGlobalShuffleYearTransformPartitionForTimestampWithZone() throws Exception {
+        Schema icebergSchema = new Schema(
+                Types.NestedField.required(1, "ts", Types.TimestampType.withZone()),
+                Types.NestedField.required(2, "k2", Types.IntegerType.get())
+        );
+        PartitionSpec yearSpec = PartitionSpec.builderFor(icebergSchema).year("ts").build();
+        Column ts = new Column("ts", DateType.DATETIME);
+        Column k2 = new Column("k2", IntegerType.INT);
+        String actualRes = getIcebergInsertExecPlanWithGlobalShuffle(
+                "iceberg_catalog_transform_year_tz", "iceberg_year_tz_table", 12345573, icebergSchema, yearSpec,
+                Lists.newArrayList(ts, k2), Lists.newArrayList(ts), Arrays.asList(0),
+                "select ts, id from iceberg_shuffle_src");
+        assertHashPartitionedByExpression(actualRes, "__iceberg_transform_timestamptz_year");
+        Assertions.assertFalse(actualRes.contains("__iceberg_transform_year("),
+                "Timestamptz partition should not use NTZ year transform:\n" + actualRes);
+    }
+
+    @Test
+    public void testInsertIcebergWithGlobalShuffleMonthTransformPartitionForTimestampWithZone() throws Exception {
+        Schema icebergSchema = new Schema(
+                Types.NestedField.required(1, "ts", Types.TimestampType.withZone()),
+                Types.NestedField.required(2, "k2", Types.IntegerType.get())
+        );
+        PartitionSpec monthSpec = PartitionSpec.builderFor(icebergSchema).month("ts").build();
+        Column ts = new Column("ts", DateType.DATETIME);
+        Column k2 = new Column("k2", IntegerType.INT);
+        String actualRes = getIcebergInsertExecPlanWithGlobalShuffle(
+                "iceberg_catalog_transform_month_tz", "iceberg_month_tz_table", 12345574, icebergSchema, monthSpec,
+                Lists.newArrayList(ts, k2), Lists.newArrayList(ts), Arrays.asList(0),
+                "select ts, id from iceberg_shuffle_src");
+        assertHashPartitionedByExpression(actualRes, "__iceberg_transform_timestamptz_month");
+        Assertions.assertFalse(actualRes.contains("__iceberg_transform_month("),
+                "Timestamptz partition should not use NTZ month transform:\n" + actualRes);
+    }
+
+    @Test
+    public void testInsertIcebergWithGlobalShuffleDayTransformPartitionForTimestampWithZone() throws Exception {
+        Schema icebergSchema = new Schema(
+                Types.NestedField.required(1, "ts", Types.TimestampType.withZone()),
+                Types.NestedField.required(2, "k2", Types.IntegerType.get())
+        );
+        PartitionSpec daySpec = PartitionSpec.builderFor(icebergSchema).day("ts").build();
+        Column ts = new Column("ts", DateType.DATETIME);
+        Column k2 = new Column("k2", IntegerType.INT);
+        String actualRes = getIcebergInsertExecPlanWithGlobalShuffle(
+                "iceberg_catalog_transform_day_tz", "iceberg_day_tz_table", 12345575, icebergSchema, daySpec,
+                Lists.newArrayList(ts, k2), Lists.newArrayList(ts), Arrays.asList(0),
+                "select ts, id from iceberg_shuffle_src");
+        assertHashPartitionedByExpression(actualRes, "__iceberg_transform_timestamptz_day");
+        Assertions.assertFalse(actualRes.contains("__iceberg_transform_day("),
+                "Timestamptz partition should not use NTZ day transform:\n" + actualRes);
+    }
+
+    @Test
+    public void testInsertIcebergWithGlobalShuffleHourTransformPartitionForTimestampWithZone() throws Exception {
+        Schema icebergSchema = new Schema(
+                Types.NestedField.required(1, "ts", Types.TimestampType.withZone()),
+                Types.NestedField.required(2, "k2", Types.IntegerType.get())
+        );
+        PartitionSpec hourSpec = PartitionSpec.builderFor(icebergSchema).hour("ts").build();
+        Column ts = new Column("ts", DateType.DATETIME);
+        Column k2 = new Column("k2", IntegerType.INT);
+        String actualRes = getIcebergInsertExecPlanWithGlobalShuffle(
+                "iceberg_catalog_transform_hour_tz", "iceberg_hour_tz_table", 12345576, icebergSchema, hourSpec,
+                Lists.newArrayList(ts, k2), Lists.newArrayList(ts), Arrays.asList(0),
+                "select ts, id from iceberg_shuffle_src");
+        assertHashPartitionedByExpression(actualRes, "__iceberg_transform_timestamptz_hour");
+        Assertions.assertFalse(actualRes.contains("__iceberg_transform_hour("),
+                "Timestamptz partition should not use NTZ hour transform:\n" + actualRes);
+    }
+
+    @Test
     public void testInsertIcebergWithGlobalShuffleTruncateTransformPartition() throws Exception {
         Schema icebergSchema = new Schema(
                 Types.NestedField.required(1, "data", Types.StringType.get()),

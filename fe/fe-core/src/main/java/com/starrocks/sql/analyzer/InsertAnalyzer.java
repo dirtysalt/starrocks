@@ -65,7 +65,6 @@ import com.starrocks.sql.common.MetaUtils;
 import com.starrocks.type.NullType;
 import com.starrocks.type.Type;
 import com.starrocks.type.VarcharType;
-import org.apache.iceberg.PartitionField;
 import org.apache.iceberg.SnapshotRef;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -209,17 +208,6 @@ public class InsertAnalyzer {
                     if (isUnSupportedPartitionColumnType(column.getType())) {
                         throw new SemanticException("Unsupported partition column type [%s] for %s table sink",
                                 column.getType().canonicalName(), table.getType());
-                    }
-                }
-            } else {
-                for (PartitionField field : ((IcebergTable) table).getNativeTable().spec().fields()) {
-                    org.apache.iceberg.types.Type type = ((IcebergTable) table).getNativeTable()
-                            .schema().findType(field.sourceId());
-                    if (type instanceof org.apache.iceberg.types.Types.TimestampType) {
-                        if (((org.apache.iceberg.types.Types.TimestampType) type).shouldAdjustToUTC()) {
-                            throw new SemanticException("Partition column %s with timezone is not supported for sink now",
-                                    field.name());
-                        }
                     }
                 }
             }

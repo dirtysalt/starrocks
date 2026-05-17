@@ -279,8 +279,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -2787,8 +2789,7 @@ public class GlobalStateMgr {
                 continue;
             }
 
-            resultMap.put(fe.getHost(), refreshOtherFeRpcExecutor.submit(
-                    () -> refreshOtherFeTableRpc(new TNetworkAddress(fe.getHost(), fe.getRpcPort()), tableName, partitions)));
+            resultMap.put(fe.getHost(), submitRefreshOtherFeRpc(fe, tableName, partitions));
         }
 
         String errMsg = "";
@@ -2823,14 +2824,36 @@ public class GlobalStateMgr {
      */
     public Future<?> refreshOthersFeTableAsync(TableName tableName, List<String> partitions) {
         List<String> partitionsSnapshot = partitions == null ? List.of() : new ArrayList<>(partitions);
-        return refreshOtherFeDispatchExecutor.submit(() -> {
-            try {
-                refreshOthersFeTable(tableName, partitionsSnapshot, false);
-            } catch (Throwable t) {
-                LOG.error("Async refresh others fe failed on {}.{}.{} with partitions {}",
-                        tableName.getCatalog(), tableName.getDb(), tableName.getTbl(), partitionsSnapshot, t);
-            }
-        });
+        try {
+            return refreshOtherFeDispatchExecutor.submit(() -> {
+                try {
+                    refreshOthersFeTable(tableName, partitionsSnapshot, false);
+                } catch (Throwable t) {
+                    LOG.error("Async refresh others fe failed on {}.{}.{} with partitions {}",
+                            tableName.getCatalog(), tableName.getDb(), tableName.getTbl(), partitionsSnapshot, t);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            LOG.error("Async refresh others fe dispatch rejected on {}.{}.{} with partitions {}",
+                    tableName.getCatalog(), tableName.getDb(), tableName.getTbl(), partitionsSnapshot, e);
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    private Future<TStatus> submitRefreshOtherFeRpc(Frontend fe, TableName tableName, List<String> partitions) {
+        TNetworkAddress thriftAddress = new TNetworkAddress(fe.getHost(), fe.getRpcPort());
+        try {
+            return refreshOtherFeRpcExecutor.submit(() -> refreshOtherFeTableRpc(thriftAddress, tableName, partitions));
+        } catch (RejectedExecutionException e) {
+            LOG.warn("Refresh other FE rpc enqueue rejected for {}", thriftAddress, e);
+            return CompletableFuture.completedFuture(buildRefreshOtherFeRejectedStatus(e));
+        }
+    }
+
+    private TStatus buildRefreshOtherFeRejectedStatus(RejectedExecutionException e) {
+        TStatus status = new TStatus(TStatusCode.INTERNAL_ERROR);
+        status.setError_msgs(Lists.newArrayList(e.getMessage()));
+        return status;
     }
 
     private TStatus refreshOtherFeTableRpc(TNetworkAddress thriftAddress, TableName tableName,

@@ -87,6 +87,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -688,6 +689,34 @@ public class GlobalStateMgrTest {
         } finally {
             Config.refresh_other_fe_rpc_executor_thread_num = originalThreadNum;
             Config.refresh_other_fe_dispatch_executor_thread_num = originalAsyncThreadNum;
+            shutdownRefreshOtherFeExecutors(globalStateMgr);
+        }
+    }
+
+    @Test
+    public void testRefreshOthersFeTableAggregatesRpcSubmitRejection() throws Exception {
+        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(Config.refresh_other_fe_rpc_executor_thread_num);
+        try {
+            getRefreshOtherFeExecutor(globalStateMgr).shutdownNow();
+
+            DdlException exception = assertThrows(DdlException.class,
+                    () -> globalStateMgr.refreshOthersFeTable(new TableName("c", "d", "t"), List.of("p1"), true));
+            Assertions.assertTrue(exception.getMessage().contains("rejected"));
+        } finally {
+            shutdownRefreshOtherFeExecutors(globalStateMgr);
+        }
+    }
+
+    @Test
+    public void testRefreshOthersFeTableAsyncDoesNotThrowOnDispatchRejection() throws Exception {
+        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1, 1);
+        try {
+            getRefreshOtherFeAsyncExecutor(globalStateMgr).shutdownNow();
+
+            Future<?> future = globalStateMgr.refreshOthersFeTableAsync(new TableName("c", "d", "t"), List.of("p1"));
+            Assertions.assertTrue(future.isDone());
+            Assertions.assertThrows(ExecutionException.class, future::get);
+        } finally {
             shutdownRefreshOtherFeExecutors(globalStateMgr);
         }
     }

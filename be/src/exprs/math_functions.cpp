@@ -523,7 +523,7 @@ StatusOr<ColumnPtr> MathFunctions::iceberg_bucket_datetime(FunctionContext* cont
 }
 
 StatusOr<ColumnPtr> MathFunctions::iceberg_bucket_timestamptz_datetime(FunctionContext* context,
-                                                                        const Columns& columns) {
+                                                                       const Columns& columns) {
     RETURN_IF_COLUMNS_ONLY_NULL(columns);
 
     const int size = columns[0]->size();

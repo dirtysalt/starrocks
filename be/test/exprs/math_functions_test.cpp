@@ -1807,7 +1807,8 @@ TEST_F(VecMathFunctionsTest, IcbergTransTest) {
         columns_const.emplace_back(std::move(const_col1));
         columns_const.emplace_back(std::move(col2));
 
-        ColumnPtr result = MathFunctions::iceberg_bucket_timestamptz_datetime(ctx_with_state.get(), columns_const).value();
+        ColumnPtr result =
+                MathFunctions::iceberg_bucket_timestamptz_datetime(ctx_with_state.get(), columns_const).value();
         ASSERT_TRUE(result->is_numeric());
         ASSERT_FALSE(result->is_nullable());
         auto v = ColumnHelper::as_column<Int32Column>(result);
@@ -1830,7 +1831,8 @@ TEST_F(VecMathFunctionsTest, IcbergTransTest) {
         columns_const.emplace_back(std::move(const_col1));
         columns_const.emplace_back(std::move(col2));
 
-        ColumnPtr result = MathFunctions::iceberg_bucket_timestamptz_datetime(ctx_with_state.get(), columns_const).value();
+        ColumnPtr result =
+                MathFunctions::iceberg_bucket_timestamptz_datetime(ctx_with_state.get(), columns_const).value();
 
         Columns normalized_columns_const;
         auto normalized_col1 = TimestampColumn::create();
@@ -1847,7 +1849,7 @@ TEST_F(VecMathFunctionsTest, IcbergTransTest) {
         ASSERT_TRUE(result->is_numeric());
         ASSERT_FALSE(result->is_nullable());
         ASSERT_EQ(ColumnHelper::as_column<Int32Column>(expected)->get_data()[0],
-                ColumnHelper::as_column<Int32Column>(result)->get_data()[0]);
+                  ColumnHelper::as_column<Int32Column>(result)->get_data()[0]);
     }
 
     {

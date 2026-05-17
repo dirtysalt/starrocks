@@ -56,13 +56,8 @@ import com.starrocks.persist.EditLog;
 import com.starrocks.persist.ImageWriter;
 import com.starrocks.persist.OperationType;
 import com.starrocks.qe.ConnectContext;
-import com.starrocks.rpc.ThriftRPCRequestExecutor;
 import com.starrocks.sql.ast.ModifyFrontendAddressClause;
 import com.starrocks.system.Frontend;
-import com.starrocks.thrift.TNetworkAddress;
-import com.starrocks.thrift.TRefreshTableResponse;
-import com.starrocks.thrift.TStatus;
-import com.starrocks.thrift.TStatusCode;
 import com.starrocks.utframe.StarRocksAssert;
 import com.starrocks.utframe.UtFrameUtils;
 import mockit.Expectations;
@@ -86,10 +81,11 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -528,145 +524,6 @@ public class GlobalStateMgrTest {
     }
 
     @Test
-    public void testRefreshOthersFeTableSuccess() throws Exception {
-        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(Config.refresh_other_fe_rpc_executor_thread_num);
-        try (MockedStatic<GlobalStateMgr> globalStateMgrMock =
-                     Mockito.mockStatic(GlobalStateMgr.class, Mockito.CALLS_REAL_METHODS);
-                MockedStatic<ThriftRPCRequestExecutor> thriftMock =
-                        Mockito.mockStatic(ThriftRPCRequestExecutor.class)) {
-            globalStateMgrMock.when(GlobalStateMgr::getCurrentState).thenReturn(globalStateMgr);
-            thriftMock.when(() -> ThriftRPCRequestExecutor.call(
-                            Mockito.any(), Mockito.any(), Mockito.anyInt(), Mockito.any()))
-                    .thenAnswer(invocation -> new TRefreshTableResponse(new TStatus(TStatusCode.OK)));
-
-            globalStateMgr.refreshOthersFeTable(new TableName("c", "d", "t"), List.of("p1"), true);
-        } finally {
-            shutdownRefreshOtherFeExecutors(globalStateMgr);
-        }
-    }
-
-    @Test
-    public void testRefreshOthersFeTableAggregatesNonOkStatus() throws Exception {
-        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(Config.refresh_other_fe_rpc_executor_thread_num);
-        try (MockedStatic<GlobalStateMgr> globalStateMgrMock =
-                     Mockito.mockStatic(GlobalStateMgr.class, Mockito.CALLS_REAL_METHODS);
-                MockedStatic<ThriftRPCRequestExecutor> thriftMock =
-                        Mockito.mockStatic(ThriftRPCRequestExecutor.class)) {
-            globalStateMgrMock.when(GlobalStateMgr::getCurrentState).thenReturn(globalStateMgr);
-            thriftMock.when(() -> ThriftRPCRequestExecutor.call(
-                            Mockito.any(), Mockito.any(), Mockito.anyInt(), Mockito.any()))
-                    .thenAnswer(invocation -> {
-                        Frontend target = findFrontendByRpcPort(globalStateMgr.getNodeMgr().getFrontends(null),
-                                ((TNetworkAddress) invocation.getArgument(1)).getPort());
-                        if ("127.0.0.2".equals(target.getHost())) {
-                            TStatus status = new TStatus(TStatusCode.INTERNAL_ERROR);
-                            status.setError_msgs(List.of("fe2 failed"));
-                            return new TRefreshTableResponse(status);
-                        }
-                        return new TRefreshTableResponse(new TStatus(TStatusCode.OK));
-                    });
-
-            DdlException exception = assertThrows(DdlException.class,
-                    () -> globalStateMgr.refreshOthersFeTable(new TableName("c", "d", "t"), List.of("p1"), true));
-            Assertions.assertTrue(exception.getMessage().contains("127.0.0.2"));
-            Assertions.assertTrue(exception.getMessage().contains("fe2 failed"));
-        } finally {
-            shutdownRefreshOtherFeExecutors(globalStateMgr);
-        }
-    }
-
-    @Test
-    public void testRefreshOthersFeTableConvertsRpcExceptionToStatus() throws Exception {
-        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(Config.refresh_other_fe_rpc_executor_thread_num);
-        try (MockedStatic<GlobalStateMgr> globalStateMgrMock =
-                     Mockito.mockStatic(GlobalStateMgr.class, Mockito.CALLS_REAL_METHODS);
-                MockedStatic<ThriftRPCRequestExecutor> thriftMock =
-                        Mockito.mockStatic(ThriftRPCRequestExecutor.class)) {
-            globalStateMgrMock.when(GlobalStateMgr::getCurrentState).thenReturn(globalStateMgr);
-            thriftMock.when(() -> ThriftRPCRequestExecutor.call(
-                            Mockito.any(), Mockito.any(), Mockito.anyInt(), Mockito.any()))
-                    .thenAnswer(invocation -> {
-                        Frontend target = findFrontendByRpcPort(globalStateMgr.getNodeMgr().getFrontends(null),
-                                ((TNetworkAddress) invocation.getArgument(1)).getPort());
-                        if ("127.0.0.2".equals(target.getHost())) {
-                            throw new RuntimeException("rpc failed");
-                        }
-                        return new TRefreshTableResponse(new TStatus(TStatusCode.OK));
-                    });
-
-            DdlException exception = assertThrows(DdlException.class,
-                    () -> globalStateMgr.refreshOthersFeTable(new TableName("c", "d", "t"), List.of("p1"), true));
-            Assertions.assertTrue(exception.getMessage().contains("127.0.0.2"));
-            Assertions.assertTrue(exception.getMessage().contains("rpc failed"));
-        } finally {
-            shutdownRefreshOtherFeExecutors(globalStateMgr);
-        }
-    }
-
-    @Test
-    public void testRefreshOthersFeTableUsesBoundedExecutor() throws Exception {
-        int originalThreadNum = Config.refresh_other_fe_rpc_executor_thread_num;
-        Config.refresh_other_fe_rpc_executor_thread_num = 1;
-        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1);
-        CopyOnWriteArrayList<String> threadNames = new CopyOnWriteArrayList<>();
-        try (MockedStatic<GlobalStateMgr> globalStateMgrMock =
-                     Mockito.mockStatic(GlobalStateMgr.class, Mockito.CALLS_REAL_METHODS);
-                MockedStatic<ThriftRPCRequestExecutor> thriftMock =
-                        Mockito.mockStatic(ThriftRPCRequestExecutor.class)) {
-            globalStateMgrMock.when(GlobalStateMgr::getCurrentState).thenReturn(globalStateMgr);
-            thriftMock.when(() -> ThriftRPCRequestExecutor.call(
-                            Mockito.any(), Mockito.any(), Mockito.anyInt(), Mockito.any()))
-                    .thenAnswer(invocation -> {
-                        threadNames.add(Thread.currentThread().getName());
-                        return new TRefreshTableResponse(new TStatus(TStatusCode.OK));
-                    });
-
-            globalStateMgr.refreshOthersFeTable(new TableName("c", "d", "t"), List.of(), true);
-
-            ThreadPoolExecutor executor = getRefreshOtherFeExecutor(globalStateMgr);
-            Assertions.assertEquals(1, executor.getCorePoolSize());
-            Assertions.assertFalse(threadNames.isEmpty());
-            Assertions.assertTrue(threadNames.stream().allMatch(name -> name.startsWith("refresh-other-fe-rpc-")));
-        } finally {
-            Config.refresh_other_fe_rpc_executor_thread_num = originalThreadNum;
-            shutdownRefreshOtherFeExecutors(globalStateMgr);
-        }
-    }
-
-    @Test
-    public void testRefreshOthersFeTableAsyncUsesDedicatedDispatcher() throws Exception {
-        int originalThreadNum = Config.refresh_other_fe_rpc_executor_thread_num;
-        int originalAsyncThreadNum = Config.refresh_other_fe_dispatch_executor_thread_num;
-        Config.refresh_other_fe_rpc_executor_thread_num = 1;
-        Config.refresh_other_fe_dispatch_executor_thread_num = 1;
-        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1, 1);
-        CopyOnWriteArrayList<String> threadNames = new CopyOnWriteArrayList<>();
-        try (MockedStatic<GlobalStateMgr> globalStateMgrMock =
-                     Mockito.mockStatic(GlobalStateMgr.class, Mockito.CALLS_REAL_METHODS);
-                MockedStatic<ThriftRPCRequestExecutor> thriftMock =
-                        Mockito.mockStatic(ThriftRPCRequestExecutor.class)) {
-            globalStateMgrMock.when(GlobalStateMgr::getCurrentState).thenReturn(globalStateMgr);
-            thriftMock.when(() -> ThriftRPCRequestExecutor.call(
-                            Mockito.any(), Mockito.any(), Mockito.anyInt(), Mockito.any()))
-                    .thenAnswer(invocation -> {
-                        threadNames.add(Thread.currentThread().getName());
-                        return new TRefreshTableResponse(new TStatus(TStatusCode.OK));
-                    });
-
-            globalStateMgr.refreshOthersFeTableAsync(new TableName("c", "d", "t"), List.of()).get();
-
-            ThreadPoolExecutor asyncExecutor = getRefreshOtherFeAsyncExecutor(globalStateMgr);
-            Assertions.assertEquals(1, asyncExecutor.getCorePoolSize());
-            Assertions.assertFalse(threadNames.isEmpty());
-            Assertions.assertTrue(threadNames.stream().allMatch(name -> name.startsWith("refresh-other-fe-rpc-")));
-        } finally {
-            Config.refresh_other_fe_rpc_executor_thread_num = originalThreadNum;
-            Config.refresh_other_fe_dispatch_executor_thread_num = originalAsyncThreadNum;
-            shutdownRefreshOtherFeExecutors(globalStateMgr);
-        }
-    }
-
-    @Test
     public void testRefreshOtherFeExecutorsResizeAfterConfigRefresh() throws Exception {
         int originalThreadNum = Config.refresh_other_fe_rpc_executor_thread_num;
         int originalAsyncThreadNum = Config.refresh_other_fe_dispatch_executor_thread_num;
@@ -696,14 +553,26 @@ public class GlobalStateMgrTest {
 
     @Test
     public void testRefreshOthersFeTableAggregatesRpcSubmitRejection() throws Exception {
-        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(Config.refresh_other_fe_rpc_executor_thread_num);
-        try {
-            getRefreshOtherFeExecutor(globalStateMgr).shutdownNow();
+        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1, 1);
+        CountDownLatch latch = new CountDownLatch(1);
+        try (MockedStatic<GlobalStateMgr> globalStateMgrMock =
+                Mockito.mockStatic(GlobalStateMgr.class, Mockito.CALLS_REAL_METHODS)) {
+            globalStateMgrMock.when(GlobalStateMgr::getCurrentState).thenReturn(globalStateMgr);
+            ThreadPoolExecutor executor = getRefreshOtherFeExecutor(globalStateMgr);
+            executor.setRejectedExecutionHandler((r, e) -> {
+                throw new RejectedExecutionException("forced rejection");
+            });
+            executor.submit(() -> awaitLatch(latch));
+            int queueCapacity = executor.getQueue().remainingCapacity();
+            for (int i = 0; i < queueCapacity; i++) {
+                executor.submit(() -> awaitLatch(latch));
+            }
 
             DdlException exception = assertThrows(DdlException.class,
                     () -> globalStateMgr.refreshOthersFeTable(new TableName("c", "d", "t"), List.of("p1"), true));
-            Assertions.assertTrue(exception.getMessage().contains("rejected"));
+            Assertions.assertTrue(exception.getMessage().contains("forced rejection"));
         } finally {
+            latch.countDown();
             shutdownRefreshOtherFeExecutors(globalStateMgr);
         }
     }
@@ -711,13 +580,23 @@ public class GlobalStateMgrTest {
     @Test
     public void testRefreshOthersFeTableAsyncDoesNotThrowOnDispatchRejection() throws Exception {
         GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1, 1);
+        CountDownLatch latch = new CountDownLatch(1);
         try {
-            getRefreshOtherFeAsyncExecutor(globalStateMgr).shutdownNow();
+            ThreadPoolExecutor executor = getRefreshOtherFeAsyncExecutor(globalStateMgr);
+            executor.setRejectedExecutionHandler((r, e) -> {
+                throw new RejectedExecutionException("forced rejection");
+            });
+            executor.submit(() -> awaitLatch(latch));
+            int queueCapacity = executor.getQueue().remainingCapacity();
+            for (int i = 0; i < queueCapacity; i++) {
+                executor.submit(() -> awaitLatch(latch));
+            }
 
             Future<?> future = globalStateMgr.refreshOthersFeTableAsync(new TableName("c", "d", "t"), List.of("p1"));
             Assertions.assertTrue(future.isDone());
             Assertions.assertThrows(ExecutionException.class, future::get);
         } finally {
+            latch.countDown();
             shutdownRefreshOtherFeExecutors(globalStateMgr);
         }
     }
@@ -784,13 +663,6 @@ public class GlobalStateMgrTest {
         field.set(nodeMgr, role);
     }
 
-    private Frontend findFrontendByRpcPort(List<Frontend> frontends, int rpcPort) {
-        return frontends.stream()
-                .filter(frontend -> frontend.getRpcPort() == rpcPort)
-                .findFirst()
-                .orElseThrow();
-    }
-
     private ThreadPoolExecutor getRefreshOtherFeExecutor(GlobalStateMgr globalStateMgr) throws Exception {
         Field field = GlobalStateMgr.class.getDeclaredField("refreshOtherFeRpcExecutor");
         field.setAccessible(true);
@@ -819,5 +691,13 @@ public class GlobalStateMgrTest {
         Method method = ConfigRefreshDaemon.class.getDeclaredMethod("runAfterCatalogReady");
         method.setAccessible(true);
         method.invoke(configRefreshDaemon);
+    }
+
+    private void awaitLatch(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

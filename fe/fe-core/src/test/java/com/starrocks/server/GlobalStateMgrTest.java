@@ -56,8 +56,13 @@ import com.starrocks.persist.EditLog;
 import com.starrocks.persist.ImageWriter;
 import com.starrocks.persist.OperationType;
 import com.starrocks.qe.ConnectContext;
+import com.starrocks.rpc.ThriftRPCRequestExecutor;
 import com.starrocks.sql.ast.ModifyFrontendAddressClause;
 import com.starrocks.system.Frontend;
+import com.starrocks.thrift.TNetworkAddress;
+import com.starrocks.thrift.TRefreshTableResponse;
+import com.starrocks.thrift.TStatus;
+import com.starrocks.thrift.TStatusCode;
 import com.starrocks.utframe.StarRocksAssert;
 import com.starrocks.utframe.UtFrameUtils;
 import mockit.Expectations;
@@ -552,6 +557,48 @@ public class GlobalStateMgrTest {
     }
 
     @Test
+    public void testRefreshOtherFeExecutorsIgnoreInvalidConfigRefresh() throws Exception {
+        int originalThreadNum = Config.refresh_other_fe_rpc_executor_thread_num;
+        int originalAsyncThreadNum = Config.refresh_other_fe_dispatch_executor_thread_num;
+        Config.refresh_other_fe_rpc_executor_thread_num = 1;
+        Config.refresh_other_fe_dispatch_executor_thread_num = 1;
+        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1, 1);
+        try {
+            ThreadPoolExecutor rpcExecutor = getRefreshOtherFeExecutor(globalStateMgr);
+            ThreadPoolExecutor dispatchExecutor = getRefreshOtherFeAsyncExecutor(globalStateMgr);
+            Config.refresh_other_fe_rpc_executor_thread_num = 0;
+            Config.refresh_other_fe_dispatch_executor_thread_num = -1;
+
+            triggerConfigRefresh(globalStateMgr.getConfigRefreshDaemon());
+
+            Assertions.assertEquals(1, rpcExecutor.getCorePoolSize());
+            Assertions.assertEquals(1, rpcExecutor.getMaximumPoolSize());
+            Assertions.assertEquals(1, dispatchExecutor.getCorePoolSize());
+            Assertions.assertEquals(1, dispatchExecutor.getMaximumPoolSize());
+        } finally {
+            Config.refresh_other_fe_rpc_executor_thread_num = originalThreadNum;
+            Config.refresh_other_fe_dispatch_executor_thread_num = originalAsyncThreadNum;
+            shutdownRefreshOtherFeExecutors(globalStateMgr);
+        }
+    }
+
+    @Test
+    public void testRefreshOthersFeTableAsyncSwallowsWorkerThrowable() throws Exception {
+        GlobalStateMgr globalStateMgr = Mockito.spy(createRefreshTestGlobalStateMgr(1, 1));
+        try {
+            Mockito.doThrow(new RuntimeException("boom"))
+                    .when(globalStateMgr)
+                    .refreshOthersFeTable(Mockito.any(), Mockito.anyList(), Mockito.eq(false));
+
+            Future<?> future = globalStateMgr.refreshOthersFeTableAsync(new TableName("c", "d", "t"), List.of("p1"));
+            future.get();
+            Assertions.assertTrue(future.isDone());
+        } finally {
+            shutdownRefreshOtherFeExecutors(globalStateMgr);
+        }
+    }
+
+    @Test
     public void testRefreshOthersFeTableAggregatesRpcSubmitRejection() throws Exception {
         GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1, 1);
         CountDownLatch latch = new CountDownLatch(1);
@@ -597,6 +644,52 @@ public class GlobalStateMgrTest {
             Assertions.assertThrows(ExecutionException.class, future::get);
         } finally {
             latch.countDown();
+            shutdownRefreshOtherFeExecutors(globalStateMgr);
+        }
+    }
+
+    @Test
+    public void testSubmitRefreshOtherFeRpcReturnsStatus() throws Exception {
+        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1, 1);
+        new MockUp<ThriftRPCRequestExecutor>() {
+            @Mock
+            public <RESULT, SERVER_CLIENT extends org.apache.thrift.TServiceClient> RESULT call(
+                    com.starrocks.rpc.ThriftConnectionPool<SERVER_CLIENT> genericPool,
+                    TNetworkAddress address,
+                    int timeoutMs,
+                    ThriftRPCRequestExecutor.MethodCallable<SERVER_CLIENT, RESULT> callable) {
+                return (RESULT) new TRefreshTableResponse(new TStatus(TStatusCode.OK));
+            }
+        };
+        try {
+            Future<TStatus> future = submitRefreshOtherFeRpc(globalStateMgr,
+                    createFrontend(FrontendNodeType.FOLLOWER, "fe2", "127.0.0.2", 9011, 9021),
+                    new TableName("c", "d", "t"), List.of("p1"));
+            Assertions.assertEquals(TStatusCode.OK, future.get().getStatus_code());
+        } finally {
+            shutdownRefreshOtherFeExecutors(globalStateMgr);
+        }
+    }
+
+    @Test
+    public void testRefreshOtherFeTableRpcReturnsInternalErrorOnException() throws Exception {
+        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1, 1);
+        new MockUp<ThriftRPCRequestExecutor>() {
+            @Mock
+            public <RESULT, SERVER_CLIENT extends org.apache.thrift.TServiceClient> RESULT call(
+                    com.starrocks.rpc.ThriftConnectionPool<SERVER_CLIENT> genericPool,
+                    TNetworkAddress address,
+                    int timeoutMs,
+                    ThriftRPCRequestExecutor.MethodCallable<SERVER_CLIENT, RESULT> callable) {
+                throw new RuntimeException("rpc failed");
+            }
+        };
+        try {
+            TStatus status = refreshOtherFeTableRpc(globalStateMgr, new TNetworkAddress("127.0.0.2", 9021),
+                    new TableName("c", "d", "t"), List.of("p1"));
+            Assertions.assertEquals(TStatusCode.INTERNAL_ERROR, status.getStatus_code());
+            Assertions.assertTrue(status.getError_msgs().contains("rpc failed"));
+        } finally {
             shutdownRefreshOtherFeExecutors(globalStateMgr);
         }
     }
@@ -699,5 +792,22 @@ public class GlobalStateMgrTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Future<TStatus> submitRefreshOtherFeRpc(GlobalStateMgr globalStateMgr, Frontend fe,
+                                                    TableName tableName, List<String> partitions) throws Exception {
+        Method method = GlobalStateMgr.class.getDeclaredMethod(
+                "submitRefreshOtherFeRpc", Frontend.class, TableName.class, List.class);
+        method.setAccessible(true);
+        return (Future<TStatus>) method.invoke(globalStateMgr, fe, tableName, partitions);
+    }
+
+    private TStatus refreshOtherFeTableRpc(GlobalStateMgr globalStateMgr, TNetworkAddress thriftAddress,
+                                           TableName tableName, List<String> partitions) throws Exception {
+        Method method = GlobalStateMgr.class.getDeclaredMethod(
+                "refreshOtherFeTableRpc", TNetworkAddress.class, TableName.class, List.class);
+        method.setAccessible(true);
+        return (TStatus) method.invoke(globalStateMgr, thriftAddress, tableName, partitions);
     }
 }

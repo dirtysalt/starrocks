@@ -202,8 +202,29 @@ bool normalize_iceberg_timestamptz_to_utc(FunctionContext* context, const Timest
         return false;
     }
 
-    normalized_timestamp->from_unix_second(unix_second, usec);
+    normalized_timestamp->from_unixtime(unix_second, usec, cctz::utc_time_zone());
     return true;
+}
+
+int64_t floor_div_microseconds(int64_t micros, int64_t unit_micros) {
+    int64_t quotient = micros / unit_micros;
+    int64_t remainder = micros % unit_micros;
+    if (remainder != 0 && ((remainder < 0) != (unit_micros < 0))) {
+        --quotient;
+    }
+    return quotient;
+}
+
+int64_t iceberg_microseconds_since_epoch(const TimestampValue& timestamp) {
+    return timestamp.diff_microsecond(TimeFunctions::unix_epoch);
+}
+
+int64_t iceberg_days_since_epoch(const TimestampValue& timestamp) {
+    return floor_div_microseconds(iceberg_microseconds_since_epoch(timestamp), USECS_PER_DAY);
+}
+
+int64_t iceberg_hours_since_epoch(const TimestampValue& timestamp) {
+    return floor_div_microseconds(iceberg_microseconds_since_epoch(timestamp), USECS_PER_HOUR);
 }
 
 template <typename TransformFn>
@@ -3391,11 +3412,11 @@ DEFINE_UNARY_FN_WITH_IMPL(iceberg_days_since_epoch_dateImpl, v) {
     int y, m, d;
     ((DateValue)v).to_date(&y, &m, &d);
     auto ts = TimestampValue::create(y, m, d, 0, 0, 0, 0);
-    return days_diffImpl::apply<TimestampValue, TimestampValue, int64_t>(ts, TimeFunctions::unix_epoch);
+    return iceberg_days_since_epoch(ts);
 }
 
 DEFINE_UNARY_FN_WITH_IMPL(iceberg_days_since_epoch_datetimeImpl, v) {
-    return days_diffImpl::apply<TimestampValue, TimestampValue, int64_t>(v, TimeFunctions::unix_epoch);
+    return iceberg_days_since_epoch(v);
 }
 
 StatusOr<ColumnPtr> TimeFunctions::iceberg_days_since_epoch_date(FunctionContext* context,
@@ -3413,12 +3434,12 @@ StatusOr<ColumnPtr> TimeFunctions::iceberg_days_since_epoch_datetime(FunctionCon
 StatusOr<ColumnPtr> TimeFunctions::iceberg_timestamptz_days_since_epoch_datetime(FunctionContext* context,
                                                                                  const starrocks::Columns& columns) {
     return evaluate_iceberg_timestamptz_transform(context, columns, [](const TimestampValue& timestamp) {
-        return days_diffImpl::apply<TimestampValue, TimestampValue, int64_t>(timestamp, TimeFunctions::unix_epoch);
+        return iceberg_days_since_epoch(timestamp);
     });
 }
 
 DEFINE_UNARY_FN_WITH_IMPL(iceberg_hours_since_epoch_datetimeImpl, v) {
-    return hours_diffImpl::apply<TimestampValue, TimestampValue, int64_t>(v, TimeFunctions::unix_epoch);
+    return iceberg_hours_since_epoch(v);
 }
 
 StatusOr<ColumnPtr> TimeFunctions::iceberg_hours_since_epoch_datetime(FunctionContext* context,
@@ -3428,9 +3449,9 @@ StatusOr<ColumnPtr> TimeFunctions::iceberg_hours_since_epoch_datetime(FunctionCo
 }
 
 StatusOr<ColumnPtr> TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(FunctionContext* context,
-                                                                                  const starrocks::Columns& columns) {
+                                                                                   const starrocks::Columns& columns) {
     return evaluate_iceberg_timestamptz_transform(context, columns, [](const TimestampValue& timestamp) {
-        return hours_diffImpl::apply<TimestampValue, TimestampValue, int64_t>(timestamp, TimeFunctions::unix_epoch);
+        return iceberg_hours_since_epoch(timestamp);
     });
 }
 

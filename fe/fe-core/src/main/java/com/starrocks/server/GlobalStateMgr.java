@@ -542,8 +542,8 @@ public class GlobalStateMgr {
     private final DDLStmtExecutor ddlStmtExecutor;
     private final ShowExecutor showExecutor;
     private final ExecutorService queryDeployExecutor;
-    private final ExecutorService refreshOtherFeDispatchExecutor;
-    private final ExecutorService refreshOtherFeRpcExecutor;
+    private final ThreadPoolExecutor refreshOtherFeDispatchExecutor;
+    private final ThreadPoolExecutor refreshOtherFeRpcExecutor;
     private final WarehouseIdleChecker warehouseIdleChecker;
 
     private final ClusterSnapshotMgr clusterSnapshotMgr;
@@ -904,6 +904,7 @@ public class GlobalStateMgr {
                 Math.max(16, Config.refresh_other_fe_rpc_executor_thread_num * 4),
                 "refresh-other-fe-rpc",
                 true);
+        getConfigRefreshDaemon().registerListener(this::refreshOtherFeExecutorConfig);
 
         this.warehouseIdleChecker = new WarehouseIdleChecker();
 
@@ -913,6 +914,28 @@ public class GlobalStateMgr {
         this.jwkMgr = new JwkMgr();
 
         this.tabletReshardJobMgr = new TabletReshardJobMgr();
+    }
+
+    private void refreshOtherFeExecutorConfig() {
+        try {
+            if (Config.refresh_other_fe_dispatch_executor_thread_num > 0) {
+                ThreadPoolManager.setFixedThreadPoolSize(
+                        refreshOtherFeDispatchExecutor, Config.refresh_other_fe_dispatch_executor_thread_num);
+            } else {
+                LOG.warn("ignore invalid config refresh_other_fe_dispatch_executor_thread_num={}",
+                        Config.refresh_other_fe_dispatch_executor_thread_num);
+            }
+
+            if (Config.refresh_other_fe_rpc_executor_thread_num > 0) {
+                ThreadPoolManager.setFixedThreadPoolSize(
+                        refreshOtherFeRpcExecutor, Config.refresh_other_fe_rpc_executor_thread_num);
+            } else {
+                LOG.warn("ignore invalid config refresh_other_fe_rpc_executor_thread_num={}",
+                        Config.refresh_other_fe_rpc_executor_thread_num);
+            }
+        } catch (Exception e) {
+            LOG.warn("failed to refresh refresh-other-FE executor config", e);
+        }
     }
 
     public static void destroyCheckpoint() {

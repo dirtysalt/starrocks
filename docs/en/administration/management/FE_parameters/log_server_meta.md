@@ -1255,7 +1255,7 @@ This topic introduces the following types of FE configurations:
 - Type: Integer
 - Unit: -
 - Is mutable: Yes
-- Description: The number of threads in the FE-global dispatch executor for asynchronous "refresh other FE" jobs. These threads only schedule background refresh tasks from connector write paths. They do not send peer FE refresh RPCs directly.
+- Description: The number of threads in the FE-global dispatch executor for asynchronous "refresh other FE" jobs. These threads only schedule background refresh tasks from connector write paths. They do not send peer FE refresh RPCs directly. Changes take effect on running FEs without restart.
 - Introduced in: -
 
 ### `refresh_other_fe_rpc_executor_thread_num`
@@ -1264,7 +1264,7 @@ This topic introduces the following types of FE configurations:
 - Type: Integer
 - Unit: -
 - Is mutable: Yes
-- Description: The number of threads in the FE-global RPC executor for "refresh other FE" fan-out. This executor bounds the number of concurrent refresh RPCs sent to peer FEs for both synchronous and asynchronous external table refresh flows.
+- Description: The number of threads in the FE-global RPC executor for "refresh other FE" fan-out. This executor bounds the number of concurrent refresh RPCs sent to peer FEs for both synchronous and asynchronous external table refresh flows. Changes take effect on running FEs without restart.
 - Introduced in: -
 
 ### `enable_collect_query_detail_info`

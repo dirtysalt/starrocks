@@ -44,6 +44,7 @@ import com.starrocks.catalog.Table;
 import com.starrocks.catalog.TableName;
 import com.starrocks.catalog.UserIdentity;
 import com.starrocks.common.Config;
+import com.starrocks.common.ConfigRefreshDaemon;
 import com.starrocks.common.DdlException;
 import com.starrocks.common.Pair;
 import com.starrocks.ha.BDBHA;
@@ -663,6 +664,34 @@ public class GlobalStateMgrTest {
         }
     }
 
+    @Test
+    public void testRefreshOtherFeExecutorsResizeAfterConfigRefresh() throws Exception {
+        int originalThreadNum = Config.refresh_other_fe_rpc_executor_thread_num;
+        int originalAsyncThreadNum = Config.refresh_other_fe_dispatch_executor_thread_num;
+        Config.refresh_other_fe_rpc_executor_thread_num = 1;
+        Config.refresh_other_fe_dispatch_executor_thread_num = 1;
+        GlobalStateMgr globalStateMgr = createRefreshTestGlobalStateMgr(1, 1);
+        try {
+            ThreadPoolExecutor rpcExecutor = getRefreshOtherFeExecutor(globalStateMgr);
+            ThreadPoolExecutor dispatchExecutor = getRefreshOtherFeAsyncExecutor(globalStateMgr);
+            Assertions.assertEquals(1, rpcExecutor.getCorePoolSize());
+            Assertions.assertEquals(1, dispatchExecutor.getCorePoolSize());
+
+            Config.refresh_other_fe_rpc_executor_thread_num = 2;
+            Config.refresh_other_fe_dispatch_executor_thread_num = 3;
+            triggerConfigRefresh(globalStateMgr.getConfigRefreshDaemon());
+
+            Assertions.assertEquals(2, rpcExecutor.getCorePoolSize());
+            Assertions.assertEquals(2, rpcExecutor.getMaximumPoolSize());
+            Assertions.assertEquals(3, dispatchExecutor.getCorePoolSize());
+            Assertions.assertEquals(3, dispatchExecutor.getMaximumPoolSize());
+        } finally {
+            Config.refresh_other_fe_rpc_executor_thread_num = originalThreadNum;
+            Config.refresh_other_fe_dispatch_executor_thread_num = originalAsyncThreadNum;
+            shutdownRefreshOtherFeExecutors(globalStateMgr);
+        }
+    }
+
     private GlobalStateMgr createRefreshTestGlobalStateMgr(int refreshThreadNum) throws Exception {
         int originalThreadNum = Config.refresh_other_fe_rpc_executor_thread_num;
         int originalAsyncThreadNum = Config.refresh_other_fe_dispatch_executor_thread_num;
@@ -754,5 +783,11 @@ public class GlobalStateMgrTest {
         field.setAccessible(true);
         ExecutorService executor = (ExecutorService) field.get(globalStateMgr);
         executor.shutdownNow();
+    }
+
+    private void triggerConfigRefresh(ConfigRefreshDaemon configRefreshDaemon) throws Exception {
+        Method method = ConfigRefreshDaemon.class.getDeclaredMethod("runAfterCatalogReady");
+        method.setAccessible(true);
+        method.invoke(configRefreshDaemon);
     }
 }

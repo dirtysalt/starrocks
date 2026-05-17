@@ -1246,7 +1246,7 @@ ADMIN SET FRONTEND CONFIG ("key" = "value");
 - タイプ：Integer
 - 単位：-
 - 変更可能：Yes
-- 説明：Connector の書き込みパスから実行される非同期の "refresh other FE" バックグラウンドジョブをスケジュールする、FE グローバルのディスパッチ実行プール内のスレッド数です。これらのスレッドはバックグラウンド更新タスクを起動するだけで、他の FE に対して更新 RPC を直接送信しません。
+- 説明：Connector の書き込みパスから実行される非同期の "refresh other FE" バックグラウンドジョブをスケジュールする、FE グローバルのディスパッチ実行プール内のスレッド数です。これらのスレッドはバックグラウンド更新タスクを起動するだけで、他の FE に対して更新 RPC を直接送信しません。変更は再起動なしで実行中の FE に反映されます。
 - 導入時期：-
 
 ### `refresh_other_fe_rpc_executor_thread_num`
@@ -1255,7 +1255,7 @@ ADMIN SET FRONTEND CONFIG ("key" = "value");
 - タイプ：Integer
 - 単位：-
 - 変更可能：Yes
-- 説明： "refresh other FE" の fan-out に使用される、FE グローバルの RPC 実行プール内のスレッド数です。この実行プールにより、同期および非同期の外部テーブル更新フローで他の FE に同時送信される更新 RPC の数が制限されます。
+- 説明： "refresh other FE" の fan-out に使用される、FE グローバルの RPC 実行プール内のスレッド数です。この実行プールにより、同期および非同期の外部テーブル更新フローで他の FE に同時送信される更新 RPC の数が制限されます。変更は再起動なしで実行中の FE に反映されます。
 - 導入時期：-
 
 ### `enable_collect_query_detail_info`

@@ -2809,6 +2809,7 @@ public class Config extends ConfigBase {
     /**
      * Number of threads used to dispatch asynchronous "refresh other FE" jobs from connector write paths.
      * These threads do not issue peer RPCs directly; they only run the top-level background refresh task.
+     * Updates take effect on running FEs through ConfigRefreshDaemon without restart.
      */
     @ConfField(mutable = true)
     public static int refresh_other_fe_dispatch_executor_thread_num = 4;
@@ -2816,6 +2817,7 @@ public class Config extends ConfigBase {
     /**
      * Number of threads used to fan out "refresh other FE" RPCs to peer FEs.
      * This pool bounds cross-FE refresh concurrency for both synchronous and asynchronous callers.
+     * Updates take effect on running FEs through ConfigRefreshDaemon without restart.
      */
     @ConfField(mutable = true)
     public static int refresh_other_fe_rpc_executor_thread_num = 4;

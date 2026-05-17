@@ -1007,6 +1007,24 @@ public class InsertPlanTest extends PlanTestBase {
     }
 
     @Test
+    public void testInsertIcebergWithGlobalShuffleBucketTransformPartitionForTimestampWithZone() throws Exception {
+        Schema icebergSchema = new Schema(
+                Types.NestedField.required(1, "ts", Types.TimestampType.withZone()),
+                Types.NestedField.required(2, "k2", Types.IntegerType.get())
+        );
+        PartitionSpec bucketSpec = PartitionSpec.builderFor(icebergSchema).bucket("ts", 10).build();
+        Column ts = new Column("ts", DateType.DATETIME);
+        Column k2 = new Column("k2", IntegerType.INT);
+        String actualRes = getIcebergInsertExecPlanWithGlobalShuffle(
+                "iceberg_catalog_transform_bucket_tz", "iceberg_bucket_tz_table", 12345577, icebergSchema, bucketSpec,
+                Lists.newArrayList(ts, k2), Lists.newArrayList(ts), Arrays.asList(0),
+                "select ts, id from iceberg_shuffle_src");
+        assertHashPartitionedByExpression(actualRes, "__iceberg_transform_timestamptz_bucket");
+        Assertions.assertFalse(actualRes.contains("__iceberg_transform_bucket("),
+                "Timestamptz partition should not use NTZ bucket transform:\n" + actualRes);
+    }
+
+    @Test
     public void testInsertIcebergWithGlobalShuffleYearTransformPartition() throws Exception {
         Schema icebergSchema = new Schema(
                 Types.NestedField.required(1, "ts", Types.DateType.get()),
@@ -1156,6 +1174,24 @@ public class InsertPlanTest extends PlanTestBase {
                 Lists.newArrayList(data, k2), Lists.newArrayList(data), Arrays.asList(0),
                 "select data, id from iceberg_shuffle_src");
         assertHashPartitionedByExpression(actualRes, "__iceberg_transform_truncate");
+    }
+
+    @Test
+    public void testInsertIcebergWithGlobalShuffleTruncateTransformPartitionForTimestampWithZoneRejected()
+            throws Exception {
+        Schema icebergSchema = new Schema(
+                Types.NestedField.required(1, "ts", Types.TimestampType.withZone()),
+                Types.NestedField.required(2, "k2", Types.IntegerType.get())
+        );
+        PartitionSpec truncateSpec = PartitionSpec.builderFor(icebergSchema).truncate("ts", 5).build();
+        Column ts = new Column("ts", DateType.DATETIME);
+        Column k2 = new Column("k2", IntegerType.INT);
+        SemanticException exception = Assertions.assertThrows(SemanticException.class, () ->
+                getIcebergInsertExecPlanWithGlobalShuffle(
+                        "iceberg_catalog_transform_truncate_tz", "iceberg_truncate_tz_table", 12345578,
+                        icebergSchema, truncateSpec, Lists.newArrayList(ts, k2), Lists.newArrayList(ts),
+                        Arrays.asList(0), "select ts, id from iceberg_shuffle_src"));
+        Assertions.assertTrue(exception.getMessage().contains("truncate transform"));
     }
 
     private String getIcebergInsertExecPlanWithGlobalShuffle(String catalogName, String tableName, long tableId,

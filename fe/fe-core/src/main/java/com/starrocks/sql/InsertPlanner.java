@@ -1060,7 +1060,9 @@ public class InsertPlanner {
                         partitionColumnIDs.add(sourceRef.getId());
                         break;
                     }
-                    String funcName = FunctionSet.ICEBERG_TRANSFORM_BUCKET;
+                    String funcName = isTimestampWithZone
+                            ? FeConstants.ICEBERG_TRANSFORM_EXPRESSION_PREFIX + "timestamptz_bucket"
+                            : FunctionSet.ICEBERG_TRANSFORM_BUCKET;
                     Type[] argTypes = new Type[] {sourceRef.getType(), com.starrocks.type.IntegerType.INT};
                     Function fn = ExprUtils.getBuiltinFunction(funcName, argTypes,
                             Function.CompareMode.IS_NONSTRICT_SUPERTYPE_OF);

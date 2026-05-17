@@ -188,13 +188,7 @@ cctz::time_zone get_iceberg_timestamptz_session_timezone(FunctionContext* contex
 }
 
 bool should_use_iceberg_timestamptz_utc_fast_path(const cctz::time_zone& timezone) {
-    if (timezone == cctz::utc_time_zone()) {
-        return true;
-    }
-
-    auto epoch = cctz::time_point<cctz::seconds>();
-    cctz::time_zone::civil_transition transition;
-    return timezone.lookup(epoch).offset == 0 && !timezone.next_transition(epoch, &transition);
+    return timezone == cctz::utc_time_zone();
 }
 
 bool normalize_iceberg_timestamptz_to_utc(FunctionContext* context, const TimestampValue& timestamp,

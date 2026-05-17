@@ -4147,7 +4147,8 @@ TEST_F(TimeFunctionsTest, IcebergTimestamptzTransTest) {
         col1->append(TimestampValue::create(2022, 2, 2, 12, 22, 22, 345678));
         columns_const.emplace_back(std::move(col1));
 
-        ColumnPtr result = TimeFunctions::iceberg_timestamptz_years_since_epoch_datetime(ctx.get(), columns_const).value();
+        ColumnPtr result =
+                TimeFunctions::iceberg_timestamptz_years_since_epoch_datetime(ctx.get(), columns_const).value();
         auto v = ColumnHelper::as_column<Int64Column>(result);
         ASSERT_EQ(2022 - 1970, v->get_data()[0]);
     }
@@ -4158,7 +4159,8 @@ TEST_F(TimeFunctionsTest, IcebergTimestamptzTransTest) {
         col1->append(TimestampValue::create(1970, 2, 2, 12, 22, 22, 1));
         columns_const.emplace_back(std::move(col1));
 
-        ColumnPtr result = TimeFunctions::iceberg_timestamptz_months_since_epoch_datetime(ctx.get(), columns_const).value();
+        ColumnPtr result =
+                TimeFunctions::iceberg_timestamptz_months_since_epoch_datetime(ctx.get(), columns_const).value();
         auto v = ColumnHelper::as_column<Int64Column>(result);
         ASSERT_EQ(1, v->get_data()[0]);
     }
@@ -4169,7 +4171,8 @@ TEST_F(TimeFunctionsTest, IcebergTimestamptzTransTest) {
         col1->append(TimestampValue::create(1970, 1, 2, 0, 0, 0, 999999));
         columns_const.emplace_back(std::move(col1));
 
-        ColumnPtr result = TimeFunctions::iceberg_timestamptz_days_since_epoch_datetime(ctx.get(), columns_const).value();
+        ColumnPtr result =
+                TimeFunctions::iceberg_timestamptz_days_since_epoch_datetime(ctx.get(), columns_const).value();
         auto v = ColumnHelper::as_column<Int64Column>(result);
         ASSERT_EQ(1, v->get_data()[0]);
     }
@@ -4180,7 +4183,8 @@ TEST_F(TimeFunctionsTest, IcebergTimestamptzTransTest) {
         col1->append(TimestampValue::create(1970, 1, 1, 23, 59, 59, 999999));
         columns_const.emplace_back(std::move(col1));
 
-        ColumnPtr result = TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(ctx.get(), columns_const).value();
+        ColumnPtr result =
+                TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(ctx.get(), columns_const).value();
         auto v = ColumnHelper::as_column<Int64Column>(result);
         ASSERT_EQ(23, v->get_data()[0]);
     }
@@ -4196,7 +4200,9 @@ TEST_F(TimeFunctionsTest, IcebergTimestamptzTransTest) {
         col1->append(TimestampValue::create(1970, 1, 1, 1, 0, 0));
         columns_const.emplace_back(std::move(col1));
 
-        ColumnPtr result = TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(_utils->get_fn_ctx(), columns_const).value();
+        ColumnPtr result =
+                TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(_utils->get_fn_ctx(), columns_const)
+                        .value();
         auto v = ColumnHelper::as_column<Int64Column>(result);
         ASSERT_EQ(1, v->get_data()[0]);
     }
@@ -4212,7 +4218,9 @@ TEST_F(TimeFunctionsTest, IcebergTimestamptzTransTest) {
         col1->append(TimestampValue::create(1970, 1, 1, 23, 0, 0, 654321));
         columns_const.emplace_back(std::move(col1));
 
-        ColumnPtr result = TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(_utils->get_fn_ctx(), columns_const).value();
+        ColumnPtr result =
+                TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(_utils->get_fn_ctx(), columns_const)
+                        .value();
         auto v = ColumnHelper::as_column<Int64Column>(result);
         ASSERT_EQ(23, v->get_data()[0]);
     }
@@ -4229,12 +4237,14 @@ TEST_F(TimeFunctionsTest, IcebergTimestamptzTransTest) {
         columns_const.emplace_back(std::move(col1));
 
         ColumnPtr day_result =
-                TimeFunctions::iceberg_timestamptz_days_since_epoch_datetime(_utils->get_fn_ctx(), columns_const).value();
+                TimeFunctions::iceberg_timestamptz_days_since_epoch_datetime(_utils->get_fn_ctx(), columns_const)
+                        .value();
         auto days = ColumnHelper::as_column<Int64Column>(day_result);
         ASSERT_EQ(-1, days->get_data()[0]);
 
         ColumnPtr hour_result =
-                TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(_utils->get_fn_ctx(), columns_const).value();
+                TimeFunctions::iceberg_timestamptz_hours_since_epoch_datetime(_utils->get_fn_ctx(), columns_const)
+                        .value();
         auto hours = ColumnHelper::as_column<Int64Column>(hour_result);
         ASSERT_EQ(-7, hours->get_data()[0]);
     }

@@ -545,6 +545,73 @@ public class StatementPlannerExternalTablesLockTest extends ConnectorPlanTestBas
     }
 
     @Test
+    public void testInsertSelectFilesystemRefreshWithUnqualifiedExternalTable() throws Exception {
+        String originalCatalog = connectContext.getCurrentCatalog();
+        String originalDb = connectContext.getDatabase();
+        try {
+            connectContext.setCurrentCatalog(MockedHiveMetadata.MOCKED_HIVE_CATALOG_NAME);
+            connectContext.setDatabase(MockedHiveMetadata.MOCKED_TPCH_DB_NAME);
+
+            CountDownLatch refreshStarted = new CountDownLatch(1);
+            CountDownLatch allowRefresh = new CountDownLatch(1);
+            AtomicInteger getTableCalls = new AtomicInteger();
+            AtomicInteger refreshCalls = new AtomicInteger();
+
+            GlobalStateMgr gsm = GlobalStateMgr.getCurrentState();
+            MockedMetadataMgr metadataMgr = (MockedMetadataMgr) gsm.getMetadataMgr();
+            metadataMgr.registerMockedMetadata(MockedHiveMetadata.MOCKED_HIVE_CATALOG_NAME,
+                    new BlockingRefreshHiveMetadata(refreshStarted, allowRefresh, getTableCalls, refreshCalls));
+
+            String sql = "insert into default_catalog.test.t0 (v1, v2) select l_orderkey, l_partkey from lineitem";
+            StatementBase stmt = UtFrameUtils.parseStmtWithNewParserNotIncludeAnalyzer(sql, connectContext);
+
+            AtomicBoolean lockCalled = new AtomicBoolean(false);
+            PlannerMetaLocker locker = new PlannerMetaLocker(connectContext, stmt) {
+                @Override
+                public void lock() {
+                    lockCalled.set(true);
+                }
+
+                @Override
+                public void unlock() {
+                    // no-op
+                }
+            };
+
+            AtomicBoolean finished = new AtomicBoolean(false);
+            AtomicReference<Throwable> error = new AtomicReference<>();
+            Thread t = new Thread(() -> {
+                try {
+                    StatementPlanner.analyzeStatement(stmt, connectContext, locker);
+                    finished.set(true);
+                } catch (Throwable t0) {
+                    error.set(t0);
+                }
+            });
+            t.start();
+
+            Assertions.assertTrue(refreshStarted.await(10, TimeUnit.SECONDS));
+            Assertions.assertFalse(lockCalled.get(),
+                    "Meta lock was acquired while refreshing an unqualified external table.");
+
+            allowRefresh.countDown();
+            t.join(TimeUnit.SECONDS.toMillis(20));
+
+            if (error.get() != null) {
+                throw new RuntimeException("INSERT ... SELECT failed: " + error.get().getMessage(), error.get());
+            }
+
+            Assertions.assertTrue(finished.get(), "INSERT ... SELECT did not finish");
+            Assertions.assertEquals(1, refreshCalls.get(), "unqualified external table should still refresh once");
+            Assertions.assertEquals(2, getTableCalls.get(),
+                    "unqualified external table should be resolved before and after refresh");
+        } finally {
+            connectContext.setCurrentCatalog(originalCatalog);
+            connectContext.setDatabase(originalDb);
+        }
+    }
+
+    @Test
     public void testNestedSubqueryWithSameNameCTE() throws Exception {
         // Test that CTE in nested subquery doesn't affect external table pre-resolution in outer query.
         // Scenario: Outer query uses external table "tbl0", nested subquery has CTE with same name "tbl0".

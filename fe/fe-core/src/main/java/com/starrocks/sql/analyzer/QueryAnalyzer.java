@@ -103,8 +103,6 @@ import com.starrocks.sql.ast.expression.StringLiteral;
 import com.starrocks.sql.common.MetaUtils;
 import com.starrocks.sql.common.TypeManager;
 import com.starrocks.sql.optimizer.dump.HiveMetaStoreTableDumpInfo;
-import com.starrocks.sql.optimizer.operator.scalar.ScalarOperator;
-import com.starrocks.sql.optimizer.transformer.OptExprBuilder;
 import com.starrocks.sql.parser.NodePosition;
 import com.starrocks.type.BooleanType;
 import com.starrocks.type.IntegerType;
@@ -2126,7 +2124,7 @@ public class QueryAnalyzer {
                 Table table = metadataMgr.getTable(session, catalogName, dbName, tableName.getTbl());
                 if (table != null) {
                     if (refreshFilesystemExternalTables && table.isExternalTableWithFileSystem()) {
-                        table = refreshFilesystemExternalTable(tableName, table);
+                        table = refreshFilesystemExternalTable(catalogName, dbName, tableName, table);
                     }
                     // Validate constraints similar to resolveTable
                     PartitionRef partitionNamesObject = tableRelation.getPartitionNames();
@@ -2141,15 +2139,15 @@ public class QueryAnalyzer {
             return null;
         }
 
-        private Table refreshFilesystemExternalTable(TableName tableName, Table resolvedTable) {
+        private Table refreshFilesystemExternalTable(String catalogName, String dbName,
+                                                     TableName tableName, Table resolvedTable) {
             try {
-                metadataMgr.refreshTable(tableName.getCatalog(), tableName.getDb(), resolvedTable, Lists.newArrayList(), false);
-                Table refreshedTable = metadataMgr.getTable(session, tableName.getCatalog(), tableName.getDb(),
-                        tableName.getTbl());
+                metadataMgr.refreshTable(catalogName, dbName, resolvedTable, Lists.newArrayList(), false);
+                Table refreshedTable = metadataMgr.getTable(session, catalogName, dbName, tableName.getTbl());
                 return refreshedTable != null ? refreshedTable : resolvedTable;
             } catch (RuntimeException e) {
                 LOG.warn("Failed to refresh external table {}.{}.{} before lock, fallback to existing metadata: {}",
-                        tableName.getCatalog(), tableName.getDb(), tableName.getTbl(), e.getMessage());
+                        catalogName, dbName, tableName.getTbl(), e.getMessage());
                 return resolvedTable;
             }
         }

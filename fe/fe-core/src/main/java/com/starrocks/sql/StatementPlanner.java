@@ -45,6 +45,7 @@ import com.starrocks.sql.analyzer.Analyzer;
 import com.starrocks.sql.analyzer.AnalyzerUtils;
 import com.starrocks.sql.analyzer.Authorizer;
 import com.starrocks.sql.analyzer.InsertAnalyzer;
+import com.starrocks.sql.analyzer.InsertSourceRefresher;
 import com.starrocks.sql.analyzer.PlannerMetaLocker;
 import com.starrocks.sql.analyzer.QueryAnalyzer;
 import com.starrocks.sql.analyzer.SemanticException;
@@ -193,6 +194,8 @@ public class StatementPlanner {
                 unLock(plannerMetaLocker);
             }
             GlobalStateMgr.getCurrentState().getMetadataMgr().removeQueryMetadata();
+            // Every plan refreshes its INSERT sources again; see InsertSourceRefresher.
+            session.getRefreshedInsertSources().clear();
         }
 
         return null;
@@ -295,16 +298,25 @@ public class StatementPlanner {
                     InsertAnalyzer.analyzeWithDeferredLock(insertStmt, session, takeLock);
                     Analyzer.AnalyzerVisitor.analyzeSubmitTaskOnly(insertStmt, (SubmitTaskStmt) statement, session);
                 } else {
-                    InsertAnalyzer.analyzeWithDeferredLock((InsertStmt) statement, session, takeLock);
+                    // The SELECT does not need the lock: refresh its remaining sources before taking it.
+                    InsertAnalyzer.analyzeWithDeferredLock((InsertStmt) statement, session, takeLock,
+                            () -> refreshRemainingInsertSources(statement, session));
                 }
                 ExplicitTxnStatementValidator.validate(statement, session);
                 return true;
             } else {
                 takeLock.run();
                 Analyzer.analyze(statement, session);
+                refreshRemainingInsertSources(statement, session);
                 ExplicitTxnStatementValidator.validate(statement, session);
                 return false;
             }
+        }
+    }
+
+    private static void refreshRemainingInsertSources(StatementBase statement, ConnectContext session) {
+        if (statement instanceof InsertStmt insertStmt && InsertSourceRefresher.isEnabled(session)) {
+            InsertSourceRefresher.refreshRemaining(insertStmt.getQueryStatement(), session);
         }
     }
 
